@@ -1,6 +1,8 @@
 <div align="center">
+  <img src="assets/astra-trade-logo.png" alt="AstraTrade Logo" width="420">
+  <br>
   <h1>AstraTrade</h1>
-  <p><strong>面向 A 股研究、模拟交易与自动化复盘的本地 Agent 控制台</strong></p>
+  <p><strong>面向 A 股研究、模拟交易与自动化决策的本地 Agent 控制台</strong></p>
   <p>
     <a href="https://github.com/BryanGao-1216/AstraTrade">GitHub Repository</a>
     ·
@@ -28,9 +30,9 @@
 
 ## 项目简介
 
-`AstraTrade` 是一个本地优先的 A 股研究与模拟交易 Agent 系统。它以 `workspace/` 作为长期记忆，围绕账户状态、市场状态、持仓池、策略池、候选池、工具调用、结构化日志和运行轨迹组织日常工作。
+`AstraTrade` 是一个本地优先的 A 股研究与模拟交易 Agent 系统，实现全自动化的市场盯盘、决策制定、交易执行。以 `workspace/` 作为本地工作空间，围绕账户状态、市场状态、持仓池、策略池、候选池、工具调用、结构化日志和运行轨迹组织日常工作。
 
-它的默认入口是本地 dashboard：你可以在页面里查看账户与市场状态、配置投资风格和 API、管理 scheduler、提交人工指令、触发主 Agent，并复盘每一次模型输出和工具调用。
+默认入口为本地 dashboard：可在页面里查看账户与市场状态、配置投资风格和 API、管理 scheduler、提交人工指令、触发主 Agent，并复盘每一次模型输出和工具调用。
 
 > 免责声明：本项目用于研究、模拟交易、策略验证和自动化复盘，不构成投资建议。任何真实交易动作都应由用户自行核验行情、账户、持仓、风控和工具返回结果后再决定。
 
