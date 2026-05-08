@@ -2,39 +2,61 @@
   <h1>AstraTrade</h1>
   <p><strong>面向 A 股研究、模拟交易与自动化复盘的本地 Agent 控制台</strong></p>
   <p>
-    <a href="#快速使用">快速使用</a> ·
-    <a href="#系统结构">系统结构</a> ·
-    <a href="#常用命令">常用命令</a> ·
-    <a href="#运行模式">运行模式</a> ·
+    <a href="https://github.com/BryanGao-1216/AstraTrade">GitHub Repository</a>
+    ·
+    <a href="#快速开始">快速开始</a>
+    ·
+    <a href="#控制台能力">控制台能力</a>
+    ·
+    <a href="#系统结构">系统结构</a>
+    ·
+    <a href="#运行模式">运行模式</a>
+    ·
     <a href="#数据文件">数据文件</a>
   </p>
   <p>
     <img src="https://img.shields.io/badge/Python-3.10%2B-blue?logo=python" alt="Python 3.10+">
     <img src="https://img.shields.io/badge/Dashboard-Local%20Web-20d0a2" alt="Local Dashboard">
-    <img src="https://img.shields.io/badge/LLM-OpenAI%20Compatible-7c3aed" alt="OpenAI Compatible">
-    <img src="https://img.shields.io/badge/Market-A%20Share-f59e0b" alt="A Share">
+    <img src="https://img.shields.io/badge/LLM-OpenAI%20Compatible-7c3aed" alt="OpenAI Compatible LLM">
+    <img src="https://img.shields.io/badge/Market-A%20Share-f59e0b" alt="A Share Market">
+    <img src="https://img.shields.io/badge/Workspace-Local%20Memory-64a8ff" alt="Local Workspace">
     <img src="https://img.shields.io/badge/License-Private-lightgrey" alt="Private License">
   </p>
 </div>
 
 ---
 
-`AstraTrade` 以本地 `workspace` 作为长期记忆，围绕「账户状态、持仓池、策略池、候选池、市场信息、工具调用、结构化日志」组织运行。它支持定时巡检、人工指令、事件触发、子 Agent 盯盘，并提供一个本地 dashboard 用来查看账户状态、配置投资风格、管理 API、配置 scheduler、触发任务和复盘 Agent 运行轨迹。
+## 项目简介
+
+`AstraTrade` 是一个本地优先的 A 股研究与模拟交易 Agent 系统。它以 `workspace/` 作为长期记忆，围绕账户状态、市场状态、持仓池、策略池、候选池、工具调用、结构化日志和运行轨迹组织日常工作。
+
+它的默认入口是本地 dashboard：你可以在页面里查看账户与市场状态、配置投资风格和 API、管理 scheduler、提交人工指令、触发主 Agent，并复盘每一次模型输出和工具调用。
 
 > 免责声明：本项目用于研究、模拟交易、策略验证和自动化复盘，不构成投资建议。任何真实交易动作都应由用户自行核验行情、账户、持仓、风控和工具返回结果后再决定。
 
-## 快速使用
+## 一眼看懂
 
-dashboard 是项目的默认入口。新用户建议先启动本地控制台，通过页面完成 API 配置、投资风格配置、scheduler 配置、人工指令提交、scheduler 控制和 Agent 运行轨迹复盘。
+| 能力 | 说明 |
+| --- | --- |
+| 本地控制台 | 账户状态、市场状态、池子看板、调度配置、人工指令、运行轨迹集中在一个 dashboard |
+| 自动巡检 | 支持盘前唤醒、盘中巡检、盘后复盘，以及持仓/候选池子 Agent 盯盘 |
+| 长期记忆 | 所有状态、日志、报告、策略与 skills 保存在 `workspace/`，便于回溯和迁移 |
+| 风格约束 | 通过 `config/investment_style.json` 生成 `workspace/STYLE.md`，约束交易周期、风险偏好和仓位风格 |
+| 结构化复盘 | 每轮 Agent 调用会落盘 prompt、工具调用、最终输出和逐步运行轨迹 |
+| 金融 Skills | 集成 `mx-data`、`mx-search`、`mx-moni` 等本地 skill，用于行情、资讯和模拟交易 |
+
+## 快速开始
+
+dashboard 是项目的默认入口。新用户建议先启动本地控制台，再通过页面完成 API 配置、投资风格配置、scheduler 配置、人工指令提交和运行轨迹复盘。
 
 ### 1. 克隆项目
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/BryanGao-1216/AstraTrade.git
 cd AstraTrade
 ```
 
-### 2. 一键初始化环境
+### 2. 一键初始化
 
 ```bash
 make setup
@@ -79,38 +101,56 @@ http://127.0.0.1:8787/
 make dashboard PORT=9000
 ```
 
-### 5. 在页面里完成日常操作
-
-dashboard 启动后可以直接完成：
-
-- 查看账户状态和仓位概览。
-- 查看持仓池、策略池、候选池。
-- 调整投资风格。
-- 配置 API 环境变量。
-- 配置自动触发规则，包括盘前唤醒、盘中唤醒、盘后唤醒和盘中巡检。
-- 输入人工指令并触发主 Agent。
-- 查看主 Agent 调用历史。
-- 打开某次调用的详细轨迹，复盘模型输出、工具调用和最终结果。
-- 启动/停止 scheduler。
-- 初始化 workspace。
-
-dashboard 后端入口：
+也可以直接启动后端：
 
 ```bash
 python dashboard/server.py 8787
 ```
 
-脚本入口：
+## 控制台能力
+
+| 页面 | 能做什么 |
+| --- | --- |
+| 主控制台 | 查看账户状态、市场状态、持仓池、策略池、候选池和系统控制 |
+| 调用轨迹 | 打开某次主 Agent 调用，复盘模型输出、工具调用和最终结果 |
+| 投资风格配置 | 调整投资周期、风险偏好、选股偏好、交易频率、仓位风格和止盈止损风格 |
+| API 配置 | 管理 LLM 与金融数据 API 的本地环境变量 |
+| 调度配置 | 配置盘前唤醒、盘中巡检、盘后复盘和已有子 Agent 命令 |
+
+主控制台中可以直接完成：
+
+- 查看账户资产、现金、持仓市值、风险限制和风控状态。
+- 查看市场观点、风险等级、热点主题、关注板块和关键事件。
+- 输入人工指令并触发主 Agent。
+- 启动或停止 scheduler。
+- 初始化 workspace。
+- 查看最近执行过的 scheduler 调用和时间。
+
+## 常用命令
+
+| 命令 | 说明 |
+| --- | --- |
+| `make setup` | 创建虚拟环境、安装依赖、生成 `.env` 和默认 workspace |
+| `make dashboard` | 启动本地 dashboard |
+| `make init` | 初始化 workspace，清空运行数据并重置账户/市场状态 |
+| `make run` | 执行一次主 Agent scheduler 模式 |
+| `make scheduler` | 启动常驻 scheduler |
+| `make manual TASK="..."` | 执行一条人工自然语言指令 |
+| `make style` | 根据投资风格配置重新生成 `workspace/STYLE.md` |
+| `make check` | 编译检查主要 Python 文件 |
+| `make clean` | 清理 Python 缓存文件 |
+
+示例：
 
 ```bash
-bash dashboard/start.sh 8787
+make manual TASK="检查当前持仓和候选池，给出下一步观察重点"
 ```
 
 ## 系统结构
 
 ```mermaid
 flowchart TB
-  User["用户 / 研究员"] --> Dashboard["本地 Dashboard<br/>账户状态 · 池子看板 · 投资风格 · API 配置 · 调度配置 · 调用轨迹"]
+  User["用户 / 研究员"] --> Dashboard["本地 Dashboard<br/>账户状态 · 市场状态 · 池子看板 · 投资风格 · API 配置 · 调度配置 · 调用轨迹"]
 
   Dashboard --> Server["dashboard/server.py<br/>本地 HTTP API"]
   Server --> Env[".env / API 配置<br/>LLM 与金融数据密钥"]
@@ -143,67 +183,17 @@ flowchart TB
   Trace --> Dashboard
 ```
 
-### 模块说明
+## 模块说明
 
 | 模块 | 作用 |
 | --- | --- |
-| Dashboard | 项目的默认入口，用于查看状态、提交人工指令、配置风格/API/scheduler、控制 scheduler 和复盘轨迹 |
+| `dashboard/` | 本地控制台，用于查看状态、提交人工指令、配置风格/API/scheduler、控制 scheduler 和复盘轨迹 |
 | `runtime/launcher.py` | 主 Agent 单次运行入口，负责进入 scheduler、manual 或 trigger 模式 |
 | `runtime/agent_loop.py` | LLM 循环与工具调用执行器，记录每一步输入、输出和工具结果 |
 | `runtime/scheduler.py` | 常驻调度器，根据 `config/scheduler.json` 执行主 Agent 唤醒和盘中子 Agent 巡检 |
 | `subagent/` | 持仓池和候选池盯盘逻辑 |
 | `workspace/` | 本地长期记忆，保存状态、池子、日志、报告和 skills |
 | `system/` | 核心提示词、模式规则、工具协议和输出协议 |
-
-## 常用命令
-
-| 命令 | 说明 |
-| --- | --- |
-| `make setup` | 创建虚拟环境、安装依赖、生成 `.env` 和默认 workspace |
-| `make dashboard` | 启动本地 dashboard |
-| `make init` | 初始化 workspace，清空运行数据并重置账户/市场状态 |
-| `make run` | 执行一次主 Agent scheduler 模式 |
-| `make scheduler` | 启动常驻 scheduler |
-| `make manual TASK="..."` | 执行一条人工自然语言指令 |
-| `make style` | 根据投资风格配置重新生成 `workspace/STYLE.md` |
-| `make check` | 编译检查主要 Python 文件 |
-| `make clean` | 清理 Python 缓存文件 |
-
-示例：
-
-```bash
-make manual TASK="检查当前持仓和候选池，给出下一步观察重点"
-```
-
-## 特性
-
-- **本地 dashboard 优先**
-  - 实时查看账户状态、持仓池、策略池、候选池。
-  - 配置投资风格和 API 环境变量。
-  - 配置 scheduler：盘前唤醒、盘中唤醒、盘后唤醒和盘中巡检。
-  - 提交人工指令。
-  - 查看主 Agent 调用历史和逐步运行轨迹。
-  - 控制 scheduler 和 workspace 初始化。
-- **主 Agent 多模式运行**
-  - `scheduler`：根据固定唤醒任务和交易时段自动运行。
-  - `manual`：接收人工自然语言指令，优先完成指定任务。
-  - `trigger`：响应外部事件，只处理触发事件相关对象。
-- **本地 workspace 记忆**
-  - `state/`：账户状态、市场状态。
-  - `pools/`：持仓池、策略池、候选池。
-  - `logs/`：交易、决策、事件和 Agent 运行轨迹。
-  - `reports/`：每次运行的 prompt 与结果。
-- **金融数据与模拟交易 Skills**
-  - `mx-data`：行情、指数、板块、资金、财务等数据。
-  - `mx-search`：金融资讯、公告、研报、政策和事件搜索。
-  - `mx-moni`：模拟组合查询、买卖、撤单、委托和资金查询。
-- **受控工具协议**
-  - 支持 `read`、`write`、`edit`、`add`、`exec`、`write_memory`。
-  - 文件写入遵循 schema，结构化数据默认追加。
-  - `exec` 默认仅允许有限命令，降低误操作风险。
-- **投资风格配置**
-  - 通过 `config/investment_style.json` 生成 `workspace/STYLE.md`。
-  - 可约束投资周期、风险偏好、选股偏好、交易频率、仓位风格和止盈止损风格。
 
 ## 手动安装
 
@@ -361,8 +351,6 @@ AstraTrade/
 
 核心结构化文件定义在 `workspace/skills/astra-trade-schema/`。
 
-常用运行文件：
-
 | 文件 | 说明 |
 | --- | --- |
 | `workspace/state/account_state.json` | 账户资金、资产、仓位和风控限制 |
@@ -373,6 +361,7 @@ AstraTrade/
 | `workspace/logs/trades.jsonl` | 交易记录 |
 | `workspace/logs/decisions.jsonl` | 关键决策记录 |
 | `workspace/logs/events.jsonl` | 外部事件、子 Agent 触发事件和系统事件 |
+| `workspace/logs/scheduler/` | scheduler 运行日志 |
 | `workspace/logs/agent_runs/{run_id}/` | 单次 Agent 调用的逐步轨迹 |
 | `workspace/reports/{run_id}_prompt.md` | 本轮发送给模型的完整 prompt |
 | `workspace/reports/{run_id}_result.json` | 本轮最终结果 |
