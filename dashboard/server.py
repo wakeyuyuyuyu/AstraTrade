@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -42,6 +43,7 @@ SCHEDULER_PID_PATH = RUNTIME_DIR / "scheduler.pid.json"
 SCHEDULER_LOG_PATH = RUNTIME_DIR / "scheduler.log"
 INITIALIZATION_LOG_PATH = RUNTIME_DIR / "initialization.log"
 SCHEDULER_CONFIG_PATH = CONFIG_DIR / "scheduler.json"
+SCHEDULER_SOURCE_PATH = ROOT / "runtime" / "scheduler.py"
 INITIALIZATION_SCRIPT_PATH = ROOT / "initialization.sh"
 ENV_PATH = ROOT / ".env"
 DEFAULT_AGENT_ENV_NAME = "stagent"
@@ -197,6 +199,77 @@ def tail_text(path: Path, lines: int = 24) -> List[str]:
         return []
 
 
+LOG_TS_RE = re.compile(r"^\[([^\]]+)\]\s*(.*)$")
+SCHEDULER_RUN_RE = re.compile(r"^RUN task=([^\s]+)\s+command=(.*)$")
+SCHEDULER_EXIT_RE = re.compile(r"^EXIT_CODE task=([^\s]+)\s+code=(-?\d+)")
+
+
+def scheduler_log_paths() -> List[Path]:
+    today_log = WORKSPACE_DIR / "logs" / "scheduler" / f"{time.strftime('%Y-%m-%d')}.log"
+    return [today_log, SCHEDULER_LOG_PATH]
+
+
+def parse_scheduler_calls(paths: List[Path], limit: int = 8) -> List[Dict[str, Any]]:
+    calls: List[Dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    for path in paths:
+        for line in tail_text(path, lines=5000):
+            ts_match = LOG_TS_RE.match(line)
+            if not ts_match:
+                continue
+
+            timestamp, message = ts_match.groups()
+            run_match = SCHEDULER_RUN_RE.match(message)
+            if run_match:
+                task, command = run_match.groups()
+                key = (timestamp, task, command)
+                if key in seen:
+                    continue
+                seen.add(key)
+                calls.append(
+                    {
+                        "time": timestamp,
+                        "task": task,
+                        "command": command,
+                        "source": rel(path),
+                    }
+                )
+                continue
+
+            exit_match = SCHEDULER_EXIT_RE.match(message)
+            if exit_match:
+                task, code = exit_match.groups()
+                for call in reversed(calls):
+                    if call.get("task") == task and "exit_code" not in call:
+                        call["exit_code"] = int(code)
+                        call["ended_at"] = timestamp
+                        break
+
+    calls.sort(key=lambda item: item.get("time", ""), reverse=True)
+    return calls[:limit]
+
+
+def scheduler_log_payload(lines: int = 18) -> Dict[str, Any]:
+    candidates = scheduler_log_paths()
+    for path in candidates:
+        tail = tail_text(path, lines=lines)
+        if tail:
+            return {
+                "file": rel(path),
+                "tail": tail,
+                "sources": [rel(item) for item in candidates],
+                "calls": parse_scheduler_calls(candidates),
+            }
+
+    return {
+        "file": rel(candidates[0]),
+        "tail": [],
+        "sources": [rel(item) for item in candidates],
+        "calls": [],
+    }
+
+
 def pid_is_running(pid: int | None) -> bool:
     if not pid:
         return False
@@ -233,6 +306,206 @@ def clear_scheduler_record() -> None:
         SCHEDULER_PID_PATH.unlink()
     except FileNotFoundError:
         pass
+
+
+def file_mtime(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except FileNotFoundError:
+        return 0.0
+
+
+def scheduler_signature() -> Dict[str, float]:
+    return {
+        "scheduler_mtime": file_mtime(SCHEDULER_SOURCE_PATH),
+        "config_mtime": file_mtime(SCHEDULER_CONFIG_PATH),
+    }
+
+
+def scheduler_record_is_stale(record: Dict[str, Any]) -> bool:
+    expected = scheduler_signature()
+    for key, value in expected.items():
+        if float(record.get(key) or 0) != value:
+            return True
+    return False
+
+
+def validate_time_value(value: Any, field_name: str) -> str:
+    text = str(value or "").strip()
+    parts = text.split(":")
+    if len(parts) != 2:
+        raise ValueError(f"{field_name} 必须是 HH:MM 格式")
+
+    try:
+        hour = int(parts[0])
+        minute = int(parts[1])
+    except ValueError as exc:
+        raise ValueError(f"{field_name} 必须是 HH:MM 格式") from exc
+
+    if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+        raise ValueError(f"{field_name} 时间超出范围")
+
+    return f"{hour:02d}:{minute:02d}"
+
+
+def clean_command_value(value: Any, field_name: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError(f"{field_name} 不能为空")
+    if "\n" in text or "\r" in text:
+        raise ValueError(f"{field_name} 不能包含换行")
+    return text
+
+
+def default_scheduler_config() -> Dict[str, Any]:
+    return {
+        "timezone": "Asia/Shanghai",
+        "main_agent_command": "python -m runtime.launcher",
+        "check_interval_seconds": 30,
+        "run_on_weekdays_only": True,
+        "fixed_jobs": [],
+        "market_sessions": [],
+        "market_subagents": [],
+    }
+
+
+def scheduler_config_payload() -> Dict[str, Any]:
+    config = read_json(SCHEDULER_CONFIG_PATH, default_scheduler_config())
+    if not isinstance(config, dict):
+        config = default_scheduler_config()
+
+    fixed_jobs = config.get("fixed_jobs") if isinstance(config.get("fixed_jobs"), list) else []
+    market_sessions = config.get("market_sessions") if isinstance(config.get("market_sessions"), list) else []
+    market_subagents = config.get("market_subagents") if isinstance(config.get("market_subagents"), list) else []
+
+    return {
+        "file": rel(SCHEDULER_CONFIG_PATH),
+        "mtime": file_mtime(SCHEDULER_CONFIG_PATH),
+        "config": config,
+        "summary": {
+            "fixed_enabled": sum(1 for item in fixed_jobs if isinstance(item, dict) and item.get("enabled", True)),
+            "fixed_total": len(fixed_jobs),
+            "session_count": len(market_sessions),
+            "subagent_enabled": sum(1 for item in market_subagents if isinstance(item, dict) and item.get("enabled", True)),
+            "subagent_total": len(market_subagents),
+        },
+    }
+
+
+def normalize_scheduler_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    normalized: Dict[str, Any] = {
+        "timezone": str(config.get("timezone") or "Asia/Shanghai").strip() or "Asia/Shanghai",
+        "main_agent_command": clean_command_value(config.get("main_agent_command", "python -m runtime.launcher"), "主 Agent 命令"),
+        "run_on_weekdays_only": bool(config.get("run_on_weekdays_only", True)),
+    }
+
+    try:
+        interval = int(config.get("check_interval_seconds", 30))
+    except Exception as exc:
+        raise ValueError("检查间隔必须是数字") from exc
+    if interval < 5 or interval > 3600:
+        raise ValueError("检查间隔必须在 5 到 3600 秒之间")
+    normalized["check_interval_seconds"] = interval
+
+    fixed_jobs = []
+    for index, item in enumerate(config.get("fixed_jobs") or [], start=1):
+        if not isinstance(item, dict):
+            raise ValueError(f"固定任务 #{index} 必须是对象")
+        fixed_jobs.append(
+            {
+                "name": clean_command_value(item.get("name"), f"固定任务 #{index} 名称"),
+                "enabled": bool(item.get("enabled", True)),
+                "time": validate_time_value(item.get("time"), f"固定任务 #{index} 时间"),
+                "trigger_reason": clean_command_value(item.get("trigger_reason"), f"固定任务 #{index} 触发原因"),
+            }
+        )
+    normalized["fixed_jobs"] = fixed_jobs
+
+    sessions = []
+    for index, item in enumerate(config.get("market_sessions") or [], start=1):
+        if not isinstance(item, dict):
+            raise ValueError(f"交易时段 #{index} 必须是对象")
+        try:
+            minutes = int(item.get("interval_minutes", 10))
+        except Exception as exc:
+            raise ValueError(f"交易时段 #{index} 间隔必须是数字") from exc
+        if minutes < 1 or minutes > 240:
+            raise ValueError(f"交易时段 #{index} 间隔必须在 1 到 240 分钟之间")
+        start = validate_time_value(item.get("start"), f"交易时段 #{index} 开始时间")
+        end = validate_time_value(item.get("end"), f"交易时段 #{index} 结束时间")
+        if start >= end:
+            raise ValueError(f"交易时段 #{index} 的结束时间必须晚于开始时间")
+        sessions.append({"start": start, "end": end, "interval_minutes": minutes})
+    normalized["market_sessions"] = sessions
+
+    subagents = []
+    for index, item in enumerate(config.get("market_subagents") or [], start=1):
+        if not isinstance(item, dict):
+            raise ValueError(f"子 Agent #{index} 必须是对象")
+        subagents.append(
+            {
+                "name": clean_command_value(item.get("name"), f"子 Agent #{index} 名称"),
+                "enabled": bool(item.get("enabled", True)),
+                "command": clean_command_value(item.get("command"), f"子 Agent #{index} 命令"),
+            }
+        )
+    normalized["market_subagents"] = subagents
+
+    return normalized
+
+
+def validate_no_new_subagents(config: Dict[str, Any]) -> None:
+    current = scheduler_config_payload().get("config", {})
+    current_items = current.get("market_subagents") if isinstance(current, dict) else []
+    current_names = {
+        str(item.get("name") or "").strip()
+        for item in (current_items or [])
+        if isinstance(item, dict) and str(item.get("name") or "").strip()
+    }
+
+    incoming_items = config.get("market_subagents") or []
+    if not isinstance(incoming_items, list):
+        raise ValueError("子 Agent 配置必须是数组")
+
+    incoming_names = {
+        str(item.get("name") or "").strip()
+        for item in incoming_items
+        if isinstance(item, dict) and str(item.get("name") or "").strip()
+    }
+
+    unknown = sorted(incoming_names - current_names)
+    if unknown:
+        raise ValueError(f"当前系统不支持新增子 Agent: {', '.join(unknown)}")
+
+
+def save_scheduler_config(payload: Dict[str, Any]) -> Dict[str, Any]:
+    config = payload.get("config", payload)
+    if not isinstance(config, dict):
+        raise ValueError("Scheduler 配置必须是 JSON object")
+
+    validate_no_new_subagents(config)
+    normalized = normalize_scheduler_config(config)
+    was_running = bool(scheduler_status().get("running"))
+
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    SCHEDULER_CONFIG_PATH.write_text(
+        json.dumps(normalized, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    restarted = False
+    if was_running:
+        stop_scheduler()
+        start_scheduler(auto=True)
+        restarted = True
+
+    return {
+        "success": True,
+        "message": "Scheduler 配置已保存" + ("，已重启 scheduler" if restarted else ""),
+        "restarted": restarted,
+        "config": scheduler_config_payload(),
+        "scheduler": scheduler_status(),
+    }
 
 
 def rel(path: Path) -> str:
@@ -358,6 +631,8 @@ def scheduler_status() -> Dict[str, Any]:
     with STATE.lock:
         process = STATE.scheduler_process
 
+    log_payload = scheduler_log_payload(lines=18)
+    expected_signature = scheduler_signature()
     record = read_scheduler_record()
     pid = int(record.get("pid") or 0)
 
@@ -369,9 +644,11 @@ def scheduler_status() -> Dict[str, Any]:
                 "started_at": "",
                 "command": f"{AGENT_PYTHON} -m runtime.scheduler",
                 "source": "dashboard",
+                **expected_signature,
             }
 
     running = pid_is_running(pid)
+    restart_required = bool(record and running and scheduler_record_is_stale(record))
     if record and not running:
         clear_scheduler_record()
 
@@ -383,8 +660,15 @@ def scheduler_status() -> Dict[str, Any]:
         "python": AGENT_PYTHON,
         "source": record.get("source", "dashboard"),
         "config_file": rel(SCHEDULER_CONFIG_PATH),
-        "log_file": rel(SCHEDULER_LOG_PATH),
-        "log_tail": tail_text(SCHEDULER_LOG_PATH, lines=18),
+        "log_file": log_payload["file"],
+        "log_sources": log_payload["sources"],
+        "log_tail": log_payload["tail"],
+        "log_calls": log_payload["calls"],
+        "scheduler_mtime": record.get("scheduler_mtime") or 0,
+        "config_mtime": record.get("config_mtime") or 0,
+        "expected_scheduler_mtime": expected_signature["scheduler_mtime"],
+        "expected_config_mtime": expected_signature["config_mtime"],
+        "restart_required": restart_required,
     }
 
 
@@ -403,7 +687,7 @@ def start_scheduler(auto: bool = False) -> Dict[str, Any]:
     status = scheduler_status()
     if status["running"]:
         expected_command = f"{AGENT_PYTHON} -m runtime.scheduler"
-        if status.get("command") != expected_command:
+        if status.get("command") != expected_command or status.get("restart_required"):
             stop_scheduler()
             status = scheduler_status()
         else:
@@ -442,6 +726,7 @@ def start_scheduler(auto: bool = False) -> Dict[str, Any]:
         "started_at": now_str(),
         "command": command_label,
         "source": "dashboard_auto_start" if auto else "dashboard_button",
+        **scheduler_signature(),
     }
     write_scheduler_record(record)
 
@@ -898,6 +1183,7 @@ def build_snapshot() -> Dict[str, Any]:
         "metrics": pool_metrics(holdings, strategies, candidates),
         "style": style_payload(),
         "api_config": api_config_payload(),
+        "scheduler_config": scheduler_config_payload(),
         "logs": {
             "agent_runs": list(reversed(read_jsonl(WORKSPACE_DIR / "logs" / "agent_runs.jsonl", limit=25))),
             "decisions": list(reversed(read_jsonl(WORKSPACE_DIR / "logs" / "decisions.jsonl", limit=12))),
@@ -1003,7 +1289,7 @@ def save_style_config(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "StockAgentDashboard/1.0"
+    server_version = "AstraTradeDashboard/1.0"
 
     def log_message(self, format: str, *args: Any) -> None:
         print(f"[{now_str()}] {self.address_string()} {format % args}")
@@ -1050,6 +1336,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(scheduler_status())
             return
 
+        if path == "/api/scheduler-config":
+            self.send_json(scheduler_config_payload())
+            return
+
         if path == "/api/initialization":
             self.send_json(initialization_status())
             return
@@ -1088,6 +1378,10 @@ class Handler(BaseHTTPRequestHandler):
 
             if parsed.path == "/api/api-config":
                 self.send_json(save_api_config(body))
+                return
+
+            if parsed.path == "/api/scheduler-config":
+                self.send_json(save_scheduler_config(body))
                 return
 
             if parsed.path == "/api/scheduler/start":
@@ -1148,7 +1442,7 @@ def main() -> None:
     except Exception as exc:
         print(f"[{now_str()}] failed to auto start scheduler: {exc}")
 
-    print(f"stock-agent dashboard running at http://{host}:{port}")
+    print(f"AstraTrade dashboard running at http://{host}:{port}")
     server.serve_forever()
 
 

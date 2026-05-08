@@ -251,6 +251,6 @@ class FileTools:
 
 
 if __name__ == "__main__":
-    
-    file_tools = FileTools("/Users/Bryan/Workspace/stock-agent/workspace")
+
+    file_tools = FileTools(Path(__file__).resolve().parents[1] / "workspace")
     file_tools.write("state/runtime_state.json", json.dumps({"status": "sdasasdasd"}))

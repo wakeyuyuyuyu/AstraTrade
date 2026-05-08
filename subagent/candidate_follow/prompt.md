@@ -23,9 +23,6 @@
 如果 candidate.status 不是以下状态，返回 `null`：
 - watching
 - ready
-- trigger_ready
-- 待观察
-- 待触发
 
 ---
 

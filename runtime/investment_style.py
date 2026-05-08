@@ -307,7 +307,7 @@ def write_style_md(
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Generate workspace/STYLE.md for stock-agent.")
+    parser = argparse.ArgumentParser(description="Generate workspace/STYLE.md for AstraTrade.")
 
     parser.add_argument(
         "--config",

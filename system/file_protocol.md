@@ -36,6 +36,7 @@ workspace 是你的唯一外部记忆。
 
 - 修改文件前必须先读取相关文件
 - JSONL 文件默认使用 `add` 追加写
+- 当需要删除JSONL 文件中的某行时，默认使用 `edit` 手动修改
 - 不得用 `write` 覆盖 JSONL 文件
 - 不删除历史记录
 - `state` 文件允许覆盖，但必须保留关键字段
@@ -44,12 +45,12 @@ workspace 是你的唯一外部记忆。
 
 ## 格式要求
 
-所有结构化文件写入前，必须使用 `stock-agent-schema` skill 确认目标文件格式。
+所有结构化文件写入前，必须使用 `astra-trade-schema` skill 确认目标文件格式。
 同一轮中再次写入同类文件时，如果已读取对应 reference，可复用该 schema 信息。
 
 执行写入前必须按顺序完成：
 
-1. 读取 `skills/stock-agent-schema/SKILL.md`
+1. 读取 `skills/astra-trade-schema/SKILL.md`
 2. 根据 SKILL.md 的指引，读取目标文件对应的 reference
 3. 再执行 `write`、`edit`、`add` 或 `write_memory`
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import sys
 import json
 import shlex
 import subprocess
@@ -109,16 +111,38 @@ def build_main_agent_command(base_command: str, trigger_reason: str, extra_instr
     return command
 
 
-def run_command(task_name: str, command: str) -> int:
-    write_log(f"RUN task={task_name} command={command}")
+def normalize_command(command: str) -> list[str]:
+    parts = shlex.split(command)
 
-    result = subprocess.run(
-        command,
-        cwd=ROOT,
-        shell=True,
-        text=True,
-        capture_output=True,
-    )
+    if parts and parts[0] in {"python", "python3"}:
+        parts[0] = sys.executable
+
+    return parts
+
+
+def run_command(task_name: str, command: str) -> int:
+    args = normalize_command(command)
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    write_log(f"RUN task={task_name} command={shlex.join(args)}")
+
+    try:
+        result = subprocess.run(
+            args,
+            cwd=ROOT,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            shell=False,
+            close_fds=True,
+            env=env,
+        )
+    except Exception as e:
+        write_log(f"SUBPROCESS_ERROR task={task_name} error={repr(e)}")
+        return -1
 
     if result.stdout:
         write_log(f"STDOUT BEGIN task={task_name}")
@@ -193,7 +217,7 @@ def main() -> None:
 
     last_run_keys: set[str] = set()
 
-    write_log("scheduler started")
+    write_log(f"scheduler started python={sys.executable}")
 
     while True:
         now = datetime.now(tz)

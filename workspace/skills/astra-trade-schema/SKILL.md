@@ -1,11 +1,11 @@
 ---
-name: stock-agent-schema
-description: Stock-agent workspace 的 schema 指引，用于决定在写入 state、pools、logs、reports 或 agent run 文件前应读取哪个 schema reference。当 Agent 需要创建、更新、追加、校验或检查 stock-agent workspace 中的结构化文件时使用，例如 state/*.json、pools/*.jsonl、logs/*.jsonl、reports/*.json 或 logs/agent_runs/*。
+name: astra-trade-schema
+description: AstraTrade workspace 的 schema 指引，用于决定在写入 state、pools、logs、reports 或 agent run 文件前应读取哪个 schema reference。当 Agent 需要创建、更新、追加、校验或检查 AstraTrade workspace 中的结构化文件时使用，例如 state/*.json、pools/*.jsonl、logs/*.jsonl、reports/*.json 或 logs/agent_runs/*。
 ---
 
-# Stock Agent Schema
+# AstraTrade Schema
 
-当需要写入或校验 stock-agent workspace 数据时，使用此 skill。
+当需要写入或校验 AstraTrade workspace 数据时，使用此 skill。
 
 目标是减少 schema 占用的上下文：不要加载所有 schema 文件，只读取目标文件所需的 reference。
 

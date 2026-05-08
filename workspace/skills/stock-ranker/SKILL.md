@@ -16,7 +16,7 @@ tags:
 
 输出格式请严格参考：
 
-skills/stock-agent-schema/references/pools.md
+skills/astra-trade-schema/references/pools.md
 
 ---
 

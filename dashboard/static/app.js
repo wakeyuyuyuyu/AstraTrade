@@ -5,6 +5,7 @@ const state = {
   styleRules: {},
   styleTitles: {},
   apiRendered: false,
+  schedulerConfigRendered: false,
   refreshing: false,
   selectedRunId: "",
   traceCache: {},
@@ -76,6 +77,7 @@ const pageMeta = {
   trace: { eyebrow: "Trace", title: "调用轨迹" },
   style: { eyebrow: "Style", title: "投资风格配置" },
   api: { eyebrow: "API", title: "API 配置" },
+  "scheduler-config": { eyebrow: "Scheduler", title: "自动触发配置" },
 };
 
 function cloneData(value) {
@@ -120,6 +122,14 @@ function shortText(value, fallback = "--") {
   if (Array.isArray(value)) return value.join("、") || fallback;
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
+}
+
+function compactDateTime(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "--";
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+  if (match) return `${match[2]}-${match[3]} ${match[4]}:${match[5]}`;
+  return raw;
 }
 
 function setMessage(id, message, type = "") {
@@ -198,15 +208,74 @@ function renderTable(bodyId, rows, columns, emptyLabel) {
   });
 }
 
+function dailyTradeCount(data, day) {
+  const account = data.account || {};
+  const explicit = account.daily_trades ?? account.daily_trade_count ?? account.today_trades;
+  if (Number.isFinite(Number(explicit))) return Number(explicit);
+
+  const trades = data.logs?.trades || [];
+  return trades.filter((trade) => {
+    const value = String(trade.timestamp || trade.created_at || trade.time || trade.date || "");
+    return value.startsWith(day);
+  }).length;
+}
+
+function riskClass(usage, hardStop = false) {
+  if (hardStop) return "danger";
+  if (!Number.isFinite(usage)) return "idle";
+  if (usage >= 1) return "danger";
+  if (usage >= 0.8) return "warn";
+  return "ok";
+}
+
+function renderRiskPill(id, config) {
+  const node = $(id);
+  if (!node) return;
+  clearNode(node);
+
+  const usage = Number(config.usage);
+  const className = riskClass(usage, config.hardStop);
+  node.className = `risk-pill ${className}`;
+  node.title = config.detail || "";
+
+  const label = document.createElement("span");
+  label.className = "risk-label";
+  label.textContent = config.label;
+
+  const value = document.createElement("strong");
+  value.textContent = config.value;
+
+  const meta = document.createElement("small");
+  meta.textContent = config.meta;
+
+  const bar = document.createElement("i");
+  const fill = document.createElement("b");
+  fill.style.width = `${clamp(Number.isFinite(usage) ? usage * 100 : 0, 0, 100)}%`;
+  bar.appendChild(fill);
+
+  node.appendChild(label);
+  node.appendChild(value);
+  node.appendChild(meta);
+  node.appendChild(bar);
+}
+
 function renderAccount(data) {
   const account = data.account || {};
   const risk = account.risk || {};
+  const holdings = data.holdings || [];
   const totalAsset = Number(account.total_asset) || 0;
   const marketValue = Number(account.market_value) || 0;
   const availableCash = Number(account.available_cash ?? account.cash) || 0;
   const allocationBase = Math.max(totalAsset, marketValue + availableCash, 1);
   const marketPct = clamp((marketValue / allocationBase) * 100, 0, 100);
   const positionRatio = totalAsset > 0 ? marketValue / totalAsset : 0;
+  const maxHoldingValue = holdings.reduce((max, item) => Math.max(max, Number(item.market_value) || 0), 0);
+  const singleStockRatio = totalAsset > 0 ? maxHoldingValue / totalAsset : 0;
+  const maxPositionRatio = Number(risk.max_position_ratio);
+  const maxSingleStockRatio = Number(risk.max_single_stock_ratio);
+  const maxDailyTrades = Number(risk.max_daily_trades);
+  const today = String(data.updated_at || "").slice(0, 10);
+  const tradesToday = dailyTradeCount(data, today);
 
   text("accountMode", account.mode || "--");
   text("totalAsset", formatMoney(totalAsset));
@@ -217,10 +286,35 @@ function renderAccount(data) {
   text("assetMarketLegend", `${formatMoney(marketValue)} · ${marketPct.toFixed(1)}%`);
   text("assetCashLegend", `${formatMoney(availableCash)} · ${(100 - marketPct).toFixed(1)}%`);
   text("assetRiskLegend", risk.stop_trading ? "停止交易" : "正常");
-  text("maxPositionRatio", `总仓位 ${formatPercent(risk.max_position_ratio)}`);
-  text("maxSingleStockRatio", `单票 ${formatPercent(risk.max_single_stock_ratio)}`);
-  text("maxDailyTrades", `日交易 ${risk.max_daily_trades ?? "--"}`);
-  text("stopTrading", risk.stop_trading ? "风控 停止交易" : "风控 正常");
+
+  renderRiskPill("maxPositionRatio", {
+    label: "总仓位",
+    value: formatPercent(positionRatio),
+    meta: Number.isFinite(maxPositionRatio) ? `上限 ${formatPercent(maxPositionRatio)}` : "未设上限",
+    usage: Number.isFinite(maxPositionRatio) && maxPositionRatio > 0 ? positionRatio / maxPositionRatio : 0,
+    detail: `当前持仓市值 ${formatMoney(marketValue)} / 总资产 ${formatMoney(totalAsset)}`,
+  });
+  renderRiskPill("maxSingleStockRatio", {
+    label: "单票",
+    value: formatPercent(singleStockRatio),
+    meta: Number.isFinite(maxSingleStockRatio) ? `上限 ${formatPercent(maxSingleStockRatio)}` : "未设上限",
+    usage: Number.isFinite(maxSingleStockRatio) && maxSingleStockRatio > 0 ? singleStockRatio / maxSingleStockRatio : 0,
+    detail: `最大单票市值 ${formatMoney(maxHoldingValue)} / 总资产 ${formatMoney(totalAsset)}`,
+  });
+  renderRiskPill("maxDailyTrades", {
+    label: "日交易",
+    value: `${tradesToday}`,
+    meta: Number.isFinite(maxDailyTrades) ? `上限 ${maxDailyTrades}` : "未设上限",
+    usage: Number.isFinite(maxDailyTrades) && maxDailyTrades > 0 ? tradesToday / maxDailyTrades : 0,
+    detail: `${today || "今日"} 已记录交易 ${tradesToday} 次`,
+  });
+  renderRiskPill("stopTrading", {
+    label: "风控",
+    value: risk.stop_trading ? "停止交易" : "正常",
+    meta: risk.stop_trading ? "已触发硬停止" : "未触发硬停止",
+    usage: risk.stop_trading ? 1 : 0,
+    hardStop: Boolean(risk.stop_trading),
+  });
 
   const assetPie = $("assetPie");
   if (assetPie) {
@@ -229,11 +323,20 @@ function renderAccount(data) {
 }
 
 function renderMarket(data) {
+  if (!$("marketRisk") && !$("marketChips")) return;
   const market = data.market || {};
-  text("marketRisk", `${market.market_view || "unknown"} / ${market.risk_level || "unknown"}`);
+  const riskText = `${market.market_view || "unknown"} / ${market.risk_level || "unknown"}`;
+  const riskNode = $("marketRisk");
+  if (riskNode) {
+    riskNode.textContent = riskText;
+    riskNode.className = `tag ${tagClass(market.risk_level)}`.trim();
+  }
+  text("marketDate", market.date || "--");
+  text("marketUpdatedAt", compactDateTime(market.updated_at));
   text("marketSummary", market.summary || "暂无市场摘要");
 
   const chips = $("marketChips");
+  if (!chips) return;
   clearNode(chips);
   const groups = [
     ["热点", market.hot_topics],
@@ -258,6 +361,144 @@ function renderMarket(data) {
     chip.textContent = "暂无标签";
     chips.appendChild(chip);
   }
+}
+
+function enabledText(value) {
+  return value === false ? "停用" : "启用";
+}
+
+function timeToMinutes(time) {
+  const match = String(time || "").match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return null;
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+function triggerBucket(job) {
+  const name = String(job.name || "").toLowerCase();
+  const reason = String(job.trigger_reason || "").toLowerCase();
+  const minutes = timeToMinutes(job.time);
+
+  if (name.includes("pre") || reason.includes("pre") || (minutes !== null && minutes < 570)) return "pre";
+  if (name.includes("post") || name.includes("night") || name.includes("evening") || reason.includes("post") || reason.includes("review") || reason.includes("plan") || (minutes !== null && minutes >= 900)) return "post";
+  return "mid";
+}
+
+function marketIntervalLabel(sessions) {
+  const values = [...new Set(sessions.map((session) => Number(session.interval_minutes)).filter(Number.isFinite))];
+  if (!values.length) return "--";
+  return values.length === 1 ? `${values[0]} 分钟` : values.map((value) => `${value}m`).join(" / ");
+}
+
+function renderTriggerGroup(parent, config) {
+  const group = document.createElement("section");
+  group.className = `trigger-group ${config.kind || ""}`.trim();
+
+  const head = document.createElement("div");
+  head.className = "trigger-group-head";
+  const titleWrap = document.createElement("div");
+  const label = document.createElement("span");
+  label.textContent = config.label;
+  const title = document.createElement("strong");
+  title.textContent = config.title;
+  titleWrap.appendChild(label);
+  titleWrap.appendChild(title);
+
+  const count = document.createElement("em");
+  count.textContent = config.count;
+  head.appendChild(titleWrap);
+  head.appendChild(count);
+  group.appendChild(head);
+
+  const rows = document.createElement("div");
+  rows.className = "trigger-group-rows";
+  if (config.times.length) {
+    config.times.forEach((item) => renderTriggerTime(rows, item.label, item.enabled, item.title));
+  } else {
+    renderTriggerTime(rows, config.emptyTitle || "暂无配置", false);
+  }
+  group.appendChild(rows);
+  parent.appendChild(group);
+}
+
+function renderTriggerTime(parent, label, enabled = true, title = "") {
+  const chip = document.createElement("span");
+  chip.className = `trigger-time ${enabled ? "" : "disabled"}`.trim();
+  chip.textContent = label;
+  chip.title = title || label;
+  parent.appendChild(chip);
+}
+
+function jobTimeChips(jobs) {
+  return jobs.map((job) => ({
+    label: job.time || "--:--",
+    title: `${job.name || "fixed_job"} · ${enabledText(job.enabled)} · ${job.trigger_reason || "--"}`,
+    enabled: job.enabled !== false,
+  }));
+}
+
+function sessionTimeChips(sessions) {
+  return sessions.map((session) => ({
+    label: `${session.start || "--:--"}-${session.end || "--:--"}`,
+    title: `盘中巡检 · 每 ${session.interval_minutes || "--"} 分钟先调用子 Agent，再按需唤醒主 Agent`,
+    enabled: true,
+  }));
+}
+
+function renderSchedulerOverview(configPayload) {
+  const payload = configPayload || {};
+  const config = payload.config || {};
+  const fixedJobs = Array.isArray(config.fixed_jobs) ? config.fixed_jobs : [];
+  const sessions = Array.isArray(config.market_sessions) ? config.market_sessions : [];
+  const subagents = Array.isArray(config.market_subagents) ? config.market_subagents : [];
+  const preJobs = fixedJobs.filter((job) => triggerBucket(job) === "pre");
+  const midJobs = fixedJobs.filter((job) => triggerBucket(job) === "mid");
+  const postJobs = fixedJobs.filter((job) => triggerBucket(job) === "post");
+  const activeSubagents = subagents.filter((item) => item.enabled !== false);
+
+  text("schedulerIntervalSummary", marketIntervalLabel(sessions));
+  text("schedulerFixedSummary", `${preJobs.filter((job) => job.enabled !== false).length} 次`);
+  text("schedulerSessionSummary", `${midJobs.filter((job) => job.enabled !== false).length} 次`);
+  text("schedulerSubagentSummary", `${postJobs.filter((job) => job.enabled !== false).length} 次`);
+
+  const list = $("schedulerTriggerList");
+  if (!list) return;
+  clearNode(list);
+
+  renderTriggerGroup(list, {
+    kind: "pre",
+    label: "PRE",
+    title: "盘前唤醒",
+    count: `${preJobs.filter((job) => job.enabled !== false).length}/${preJobs.length}`,
+    times: jobTimeChips(preJobs),
+    emptyTitle: "暂无盘前任务",
+  });
+
+  renderTriggerGroup(list, {
+    kind: "post",
+    label: "POST",
+    title: "盘后唤醒",
+    count: `${postJobs.filter((job) => job.enabled !== false).length}/${postJobs.length}`,
+    times: jobTimeChips(postJobs),
+    emptyTitle: "暂无盘后任务",
+  });
+
+  renderTriggerGroup(list, {
+    kind: "mid",
+    label: "LIVE",
+    title: "盘中巡检",
+    count: `${sessions.length} 段 · ${activeSubagents.length}/${subagents.length} agent`,
+    times: sessionTimeChips(sessions),
+    emptyTitle: "暂无盘中巡检",
+  });
+
+  renderTriggerGroup(list, {
+    kind: "wake",
+    label: "WAKE",
+    title: "盘中唤醒",
+    count: `${midJobs.filter((job) => job.enabled !== false).length}/${midJobs.length}`,
+    times: jobTimeChips(midJobs),
+    emptyTitle: "暂无盘中唤醒",
+  });
 }
 
 function renderPools(data) {
@@ -367,7 +608,21 @@ function renderHoldingsOverview(holdings) {
   holdings.slice(0, 6).forEach((item, index) => {
     const value = Number(item.market_value) || 0;
     const row = document.createElement("div");
-    row.innerHTML = `<span class="legend-dot" style="background:${holdingColor(index)}"></span><span>${shortText(item.name || item.symbol)}</span><strong>${formatPercent(value / marketTotal)}</strong>`;
+    const dot = document.createElement("span");
+    dot.className = "legend-dot";
+    dot.style.background = holdingColor(index);
+
+    const name = document.createElement("span");
+    name.className = "holding-legend-name";
+    name.textContent = shortText(item.name || item.symbol);
+    name.title = name.textContent;
+
+    const percent = document.createElement("strong");
+    percent.textContent = formatPercent(value / marketTotal);
+
+    row.appendChild(dot);
+    row.appendChild(name);
+    row.appendChild(percent);
     legend.appendChild(row);
   });
 }
@@ -710,6 +965,240 @@ async function saveApiConfig() {
   }
 }
 
+function schedulerInput(type, field, value, placeholder = "") {
+  const input = document.createElement("input");
+  input.type = type;
+  input.dataset.field = field;
+  input.placeholder = placeholder;
+  if (type === "checkbox") {
+    input.checked = value !== false;
+  } else {
+    input.value = value ?? "";
+  }
+  if (type === "number") {
+    input.min = field === "interval_minutes" ? "1" : "5";
+    input.max = field === "interval_minutes" ? "240" : "3600";
+    input.step = "1";
+  }
+  return input;
+}
+
+function schedulerCell(label, input) {
+  const wrap = document.createElement("label");
+  wrap.className = "scheduler-cell";
+  const span = document.createElement("span");
+  span.textContent = label;
+  wrap.appendChild(span);
+  wrap.appendChild(input);
+  return wrap;
+}
+
+function createSchedulerRow(kind, item = {}) {
+  const row = document.createElement("div");
+  row.className = `scheduler-config-row ${kind}`;
+  row.dataset.kind = kind;
+
+  if (kind === "fixed") {
+    row.appendChild(schedulerCell("启用", schedulerInput("checkbox", "enabled", item.enabled)));
+    row.appendChild(schedulerCell("名称", schedulerInput("text", "name", item.name || "", "premarket_0830")));
+    row.appendChild(schedulerCell("时间", schedulerInput("time", "time", item.time || "09:30")));
+    row.appendChild(schedulerCell("触发原因", schedulerInput("text", "trigger_reason", item.trigger_reason || "", "scheduled_premarket")));
+  }
+
+  if (kind === "session") {
+    row.appendChild(schedulerCell("开始", schedulerInput("time", "start", item.start || "09:30")));
+    row.appendChild(schedulerCell("结束", schedulerInput("time", "end", item.end || "11:30")));
+    row.appendChild(schedulerCell("间隔分钟", schedulerInput("number", "interval_minutes", item.interval_minutes || 10)));
+  }
+
+  if (kind === "subagent") {
+    row.appendChild(schedulerCell("启用", schedulerInput("checkbox", "enabled", item.enabled)));
+    const nameInput = schedulerInput("text", "name", item.name || "", "holding_follow");
+    nameInput.readOnly = true;
+    row.appendChild(schedulerCell("名称", nameInput));
+    row.appendChild(schedulerCell("命令", schedulerInput("text", "command", item.command || "", "python -m subagent.holding_follow.exec_agent")));
+  }
+
+  if (kind !== "subagent") {
+    const remove = document.createElement("button");
+    remove.className = "icon-button scheduler-remove";
+    remove.type = "button";
+    remove.title = "删除";
+    remove.dataset.action = "remove-scheduler-row";
+    remove.textContent = "×";
+    row.appendChild(remove);
+  }
+  return row;
+}
+
+function renderSchedulerRows(containerId, kind, rows) {
+  const container = $(containerId);
+  if (!container) return;
+  clearNode(container);
+
+  if (!rows.length) {
+    const empty = document.createElement("div");
+    empty.className = "scheduler-empty";
+    empty.textContent = "暂无配置";
+    container.appendChild(empty);
+    return;
+  }
+
+  rows.forEach((item) => container.appendChild(createSchedulerRow(kind, item)));
+}
+
+function renderSchedulerConfig(configPayload, force = false) {
+  const panel = $("schedulerTimezone");
+  if (!panel || !configPayload || (state.schedulerConfigRendered && !force)) return;
+
+  const config = configPayload.config || {};
+  text("schedulerConfigFile", configPayload.file || "config/scheduler.json");
+  $("schedulerTimezone").value = config.timezone || "Asia/Shanghai";
+  $("schedulerMainCommand").value = config.main_agent_command || "python -m runtime.launcher";
+  $("schedulerCheckInterval").value = config.check_interval_seconds || 30;
+  $("schedulerWeekdaysOnly").checked = config.run_on_weekdays_only !== false;
+
+  renderSchedulerRows("fixedJobsEditor", "fixed", Array.isArray(config.fixed_jobs) ? config.fixed_jobs : []);
+  renderSchedulerRows("marketSessionsEditor", "session", Array.isArray(config.market_sessions) ? config.market_sessions : []);
+  renderSchedulerRows("marketSubagentsEditor", "subagent", Array.isArray(config.market_subagents) ? config.market_subagents : []);
+
+  state.schedulerConfigRendered = true;
+}
+
+function collectSchedulerRows(containerId) {
+  return [...document.querySelectorAll(`#${containerId} .scheduler-config-row`)].map((row) => {
+    const item = {};
+    row.querySelectorAll("[data-field]").forEach((input) => {
+      const field = input.dataset.field;
+      if (input.type === "checkbox") {
+        item[field] = input.checked;
+      } else if (input.type === "number") {
+        item[field] = Number(input.value);
+      } else {
+        item[field] = input.value.trim();
+      }
+    });
+    return item;
+  });
+}
+
+function collectSchedulerConfig() {
+  return {
+    timezone: $("schedulerTimezone").value.trim() || "Asia/Shanghai",
+    main_agent_command: $("schedulerMainCommand").value.trim(),
+    check_interval_seconds: Number($("schedulerCheckInterval").value),
+    run_on_weekdays_only: $("schedulerWeekdaysOnly").checked,
+    fixed_jobs: collectSchedulerRows("fixedJobsEditor"),
+    market_sessions: collectSchedulerRows("marketSessionsEditor"),
+    market_subagents: collectSchedulerRows("marketSubagentsEditor"),
+  };
+}
+
+function validateTimeInput(value, label) {
+  if (!/^\d{2}:\d{2}$/.test(String(value || ""))) return `${label} 必须是 HH:MM`;
+  return "";
+}
+
+function validateSchedulerConfig(config) {
+  if (!config.main_agent_command) return "主 Agent 命令不能为空";
+  if (!Number.isInteger(config.check_interval_seconds) || config.check_interval_seconds < 5 || config.check_interval_seconds > 3600) {
+    return "检查间隔必须在 5 到 3600 秒之间";
+  }
+
+  for (const [index, job] of config.fixed_jobs.entries()) {
+    if (!job.name) return `固定任务 #${index + 1} 名称不能为空`;
+    const timeError = validateTimeInput(job.time, `固定任务 #${index + 1} 时间`);
+    if (timeError) return timeError;
+    if (!job.trigger_reason) return `固定任务 #${index + 1} 触发原因不能为空`;
+  }
+
+  for (const [index, session] of config.market_sessions.entries()) {
+    const startError = validateTimeInput(session.start, `交易时段 #${index + 1} 开始时间`);
+    if (startError) return startError;
+    const endError = validateTimeInput(session.end, `交易时段 #${index + 1} 结束时间`);
+    if (endError) return endError;
+    if (!Number.isInteger(session.interval_minutes) || session.interval_minutes < 1 || session.interval_minutes > 240) {
+      return `交易时段 #${index + 1} 间隔必须在 1 到 240 分钟之间`;
+    }
+  }
+
+  for (const [index, subagent] of config.market_subagents.entries()) {
+    if (!subagent.name) return `子 Agent #${index + 1} 名称不能为空`;
+    if (!subagent.command) return `子 Agent #${index + 1} 命令不能为空`;
+  }
+
+  return "";
+}
+
+async function saveSchedulerConfig() {
+  const button = $("saveSchedulerConfigBtn");
+  button.disabled = true;
+  setMessage("schedulerConfigMessage", "保存中...");
+
+  try {
+    const config = collectSchedulerConfig();
+    const validationError = validateSchedulerConfig(config);
+    if (validationError) throw new Error(validationError);
+
+    const response = await fetch("/api/scheduler-config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ config }),
+    });
+    const data = await response.json();
+    if (!response.ok || data.success === false) throw new Error(data.error || "保存失败");
+
+    state.schedulerConfigRendered = false;
+    renderSchedulerConfig(data.config, true);
+    renderSchedulerOverview(data.config);
+    setMessage("schedulerConfigMessage", data.message || "已保存 Scheduler 配置", "ok");
+    await refresh();
+  } catch (error) {
+    setMessage("schedulerConfigMessage", error.message, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function addSchedulerRow(containerId, kind, item) {
+  const container = $(containerId);
+  if (!container) return;
+  const empty = container.querySelector(".scheduler-empty");
+  if (empty) empty.remove();
+  container.appendChild(createSchedulerRow(kind, item));
+}
+
+function addFixedJob() {
+  addSchedulerRow("fixedJobsEditor", "fixed", {
+    name: `custom_${Date.now().toString().slice(-4)}`,
+    enabled: true,
+    time: "09:30",
+    trigger_reason: "scheduled_custom",
+  });
+}
+
+function addMarketSession() {
+  addSchedulerRow("marketSessionsEditor", "session", {
+    start: "09:30",
+    end: "11:30",
+    interval_minutes: 10,
+  });
+}
+
+function handleSchedulerEditorClick(event) {
+  const button = event.target.closest("[data-action='remove-scheduler-row']");
+  if (!button) return;
+  const row = button.closest(".scheduler-config-row");
+  const list = row?.parentElement;
+  row?.remove();
+  if (list && !list.querySelector(".scheduler-config-row")) {
+    const empty = document.createElement("div");
+    empty.className = "scheduler-empty";
+    empty.textContent = "暂无配置";
+    list.appendChild(empty);
+  }
+}
+
 function renderManual(data) {
   const manual = data.manual_run || {};
   const running = Boolean(manual.running);
@@ -785,6 +1274,66 @@ function renderManualRecentList(manual) {
   });
 }
 
+function logLineClass(line) {
+  const lower = String(line || "").toLowerCase();
+  if (lower.includes("stderr") || lower.includes("fatal") || lower.includes("error") || lower.includes("code=1") || lower.includes("failed")) return "error";
+  if (lower.includes("skip") || lower.includes("warning") || lower.includes("warn")) return "warn";
+  if (lower.includes("exit_code") && lower.includes("code=0")) return "ok";
+  if (lower.includes("run task") || lower.includes("trigger matched") || lower.includes("starting scheduler")) return "run";
+  return "";
+}
+
+function schedulerCallsFromTail(lines) {
+  return (Array.isArray(lines) ? lines : []).reduce((items, line) => {
+    const match = String(line || "").match(/^\[([^\]]+)\]\s*RUN task=([^\s]+)\s+command=(.*)$/);
+    if (match) {
+      items.unshift({
+        time: match[1],
+        task: match[2],
+        command: match[3],
+      });
+    }
+    return items;
+  }, []);
+}
+
+function renderSchedulerLog(scheduler) {
+  const source = $("schedulerLogSource");
+  const list = $("schedulerLogTail");
+  const calls = Array.isArray(scheduler.log_calls) && scheduler.log_calls.length
+    ? scheduler.log_calls
+    : schedulerCallsFromTail(scheduler.log_tail);
+  if (source) source.textContent = calls.length ? `最近 ${calls.length} 次` : "暂无调用";
+  if (!list) return;
+  clearNode(list);
+
+  if (!calls.length) {
+    const empty = document.createElement("div");
+    empty.className = "log-empty";
+    empty.textContent = "暂无 scheduler 调用";
+    list.appendChild(empty);
+    return;
+  }
+
+  calls.forEach((call) => {
+    const item = document.createElement("div");
+    const exitCode = Number(call.exit_code);
+    const className = Number.isFinite(exitCode) ? (exitCode === 0 ? "ok" : "error") : "run";
+    item.className = `scheduler-call ${className}`;
+    item.title = call.command || "";
+
+    const timeNode = document.createElement("span");
+    timeNode.textContent = compactDateTime(call.time);
+
+    const task = document.createElement("strong");
+    task.textContent = call.task || "scheduler";
+
+    item.appendChild(timeNode);
+    item.appendChild(task);
+    list.appendChild(item);
+  });
+}
+
 async function runManual() {
   const task = $("manualTask").value.trim();
   const maxSteps = Number($("maxSteps").value || 50);
@@ -842,10 +1391,7 @@ function renderSystem(data) {
         : "清空运行数据并重置账户/市场状态"
   );
 
-  const logTail = $("schedulerLogTail");
-  if (logTail) {
-    logTail.textContent = (scheduler.log_tail || []).join("\n") || "暂无 scheduler 日志";
-  }
+  renderSchedulerLog(scheduler);
 
   $("startSchedulerBtn").disabled = schedulerRunning || initializationRunning;
   $("stopSchedulerBtn").disabled = !schedulerRunning || initializationRunning;
@@ -1339,6 +1885,8 @@ function render(data) {
   renderPools(data);
   renderStyleSummary(data.style);
   renderApiConfig(data.api_config);
+  renderSchedulerOverview(data.scheduler_config);
+  renderSchedulerConfig(data.scheduler_config);
   renderManual(data);
   renderSystem(data);
   if (state.selectedRunId) {
@@ -1374,6 +1922,7 @@ async function refresh() {
     setMessage("manualMessage", "Dashboard 服务未连接。请在项目根目录运行：python dashboard/server.py 8787", "error");
     setMessage("styleMessage", "保存风格需要 dashboard 服务在线。", "error");
     setMessage("apiMessage", "保存 API 配置需要 dashboard 服务在线。", "error");
+    setMessage("schedulerConfigMessage", "保存调度配置需要 dashboard 服务在线。", "error");
     console.error(error);
   } finally {
     state.refreshing = false;
@@ -1384,6 +1933,11 @@ function bindEvents() {
   $("refreshBtn").addEventListener("click", () => refresh());
   $("saveStyleBtn").addEventListener("click", () => saveStyle());
   $("saveApiBtn").addEventListener("click", () => saveApiConfig());
+  $("saveSchedulerConfigBtn").addEventListener("click", () => saveSchedulerConfig());
+  $("addFixedJobBtn").addEventListener("click", () => addFixedJob());
+  $("addMarketSessionBtn").addEventListener("click", () => addMarketSession());
+  $("fixedJobsEditor").addEventListener("click", handleSchedulerEditorClick);
+  $("marketSessionsEditor").addEventListener("click", handleSchedulerEditorClick);
   $("runManualBtn").addEventListener("click", () => runManual());
   $("startSchedulerBtn").addEventListener("click", () => startScheduler());
   $("stopSchedulerBtn").addEventListener("click", () => stopScheduler());

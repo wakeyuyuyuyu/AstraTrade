@@ -1,9 +1,8 @@
 {
   "timezone": "Asia/Shanghai",
   "main_agent_command": "python -m runtime.launcher",
-  "check_interval_seconds": 50,
   "run_on_weekdays_only": true,
-
+  "check_interval_seconds": 30,
   "fixed_jobs": [
     {
       "name": "premarket_0830",
@@ -52,9 +51,14 @@
       "enabled": true,
       "time": "20:00",
       "trigger_reason": "scheduled_plan"
+    },
+    {
+      "name": "custom_6941",
+      "enabled": true,
+      "time": "15:57",
+      "trigger_reason": "scheduled_custom"
     }
   ],
-
   "market_sessions": [
     {
       "start": "09:30",
@@ -67,7 +71,6 @@
       "interval_minutes": 10
     }
   ],
-
   "market_subagents": [
     {
       "name": "holding_follow",

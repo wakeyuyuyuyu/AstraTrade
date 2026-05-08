@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # mx_search - 妙想资讯搜索 skill
 # 基于东方财富妙想搜索API提供金融资讯搜索能力
-# 默认输出目录: /Users/Bryan/mx_data/output/
+# 默认输出目录: workspace/logs/mx_data/output/
 
 import os
 import sys
@@ -10,6 +10,8 @@ import re
 import requests
 from pathlib import Path
 from typing import Dict, List, Optional, Any
+
+DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parents[2] / "logs" / "mx_data" / "output"
 
 def safe_filename(text: str, max_len: int = 80) -> str:
     """Convert query string to safe filenameh"""
@@ -153,7 +155,7 @@ def main():
     # 解析参数
     if len(sys.argv) < 2:
         print(f"用法: {sys.argv[0]} \"搜索问句\" [输出目录]")
-        print(f"默认输出目录: /Users/Bryan/mx_data/output/")
+        print(f"默认输出目录: {DEFAULT_OUTPUT_DIR}")
         print("示例: python mx_search.py \"格力电器最新研报\"")
         sys.exit(1)
     
@@ -163,8 +165,7 @@ def main():
         output_dir = Path(sys.argv[-1])
     else:
         query = " ".join(sys.argv[1:])
-        # 默认输出到固定目录
-        output_dir = Path("/Users/Bryan/Workspace/stock-agent/workspace/logs/mx_data/output")
+        output_dir = DEFAULT_OUTPUT_DIR
     
     # 确保输出目录存在
     output_dir.mkdir(parents=True, exist_ok=True)

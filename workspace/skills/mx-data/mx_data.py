@@ -12,6 +12,8 @@ import requests
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 
+DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parents[2] / "logs" / "mx_data" / "output"
+
 def safe_filename(s: str, max_len: int = 80) -> str:
     """Convert query string to safe filename """
     s = re.sub(r'[<>:"/\\|?*\[\]]', "_", s)
@@ -327,7 +329,7 @@ def main():
     """命令行入口 - 保持与 MX_FinData 一致的使用方式，输出 Excel 多 sheet"""
     if len(sys.argv) < 2:
         print(f"用法: {sys.argv[0]} \"查询问句\" [输出目录]")
-        print(f"默认输出目录: /Users/Bryan/mx_data/output/")
+        print(f"默认输出目录: {DEFAULT_OUTPUT_DIR}")
         print("示例: python mx_data.py \"同花顺最近3年每天的最新价\"")
         sys.exit(1)
     
@@ -337,8 +339,7 @@ def main():
         output_dir = Path(sys.argv[-1])
     else:
         query = " ".join(sys.argv[1:])
-        # Default output to fixed directory
-        output_dir = Path("/Users/Bryan/Workspace/stock-agent/workspace/logs/mx_data/output")
+        output_dir = DEFAULT_OUTPUT_DIR
     
     # Ensure output directory exists
     output_dir.mkdir(parents=True, exist_ok=True)

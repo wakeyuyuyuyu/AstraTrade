@@ -1,96 +1,26 @@
 from __future__ import annotations
 
-import os
-import sys
 import json
+import subprocess
+import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import pandas as pd
-import requests
 from dotenv import load_dotenv
 
 
 load_dotenv()
 
-MX_APIKEY = os.environ.get("MX_APIKEY")
-MX_API_URL = os.environ.get("MX_API_URL")
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+CANDIDATES_PATH = PROJECT_ROOT / "workspace" / "pools" / "candidates.jsonl"
+MX_DATA_SCRIPT = PROJECT_ROOT / "workspace" / "skills" / "mx-data" / "mx_data.py"
+MX_DATA_OUTPUT_DIR = PROJECT_ROOT / "workspace" / "logs" / "mx_data" / "output"
+
 OUTPUT_DIR = PROJECT_ROOT / "subagent" / "candidate_follow" / "candidate_state"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-
-def check_apikey() -> None:
-    """检查 API 密钥和行情接口是否配置。"""
-    if not MX_APIKEY:
-        print("错误: 未配置 MX_APIKEY 环境变量，请先配置 API 密钥")
-        print("示例: export MX_APIKEY=your_api_key_here")
-        sys.exit(1)
-
-    if not MX_API_URL:
-        print("错误: 未配置 MX_API_URL 环境变量，请先配置 API 地址")
-        sys.exit(1)
-
-
-def make_request(endpoint: str, body: Dict[str, Any], output_prefix: str, time_str: str) -> Path:
-    """发送 POST 请求并保存结果。"""
-    check_apikey()
-
-    full_url = f"{MX_API_URL}{endpoint}"
-    headers = {
-        "apikey": MX_APIKEY,
-        "Content-Type": "application/json",
-    }
-
-    try:
-        response = requests.post(full_url, headers=headers, json=body, timeout=30)
-        response.raise_for_status()
-        result = response.json()
-
-        output_path = OUTPUT_DIR / f"{output_prefix}_{time_str}.json"
-        with output_path.open("w", encoding="utf-8") as f:
-            json.dump(result, f, ensure_ascii=False, indent=2)
-
-        print(f"请求完成，结果保存在 {output_path}")
-
-        if result.get("success") or str(result.get("code")) == "200":
-            print("\n操作结果: 成功")
-            if "message" in result:
-                print(f"提示信息: {result['message']}")
-        else:
-            print("\n操作结果: 失败")
-            print(f"错误码: {result.get('code')}")
-            print(f"错误信息: {result.get('message')}")
-
-        return output_path
-
-    except Exception as e:
-        print(f"网络请求失败: {str(e)}")
-        sys.exit(1)
-
-
-def ask_candidate_quote(symbol: str, name: str, time_str: str) -> Path:
-    """
-    请求单只候选股票的行情信息。
-
-    不同 MX 行情接口的 body 可能不同。
-    如果你的实际接口字段不同，只需要修改这里。
-    """
-    body = {
-        "symbol": symbol,
-        "secCode": symbol,
-        "name": name,
-        "moneyUnit": 1,
-    }
-
-    return make_request(
-        "/api/claw/mockTrading/positions",
-        body,
-        output_prefix=f"candidate_{symbol}",
-        time_str=time_str,
-    )
 
 
 def read_candidates_jsonl(path: Path) -> pd.DataFrame:
@@ -161,7 +91,11 @@ def normalize_old_candidates(df: pd.DataFrame) -> pd.DataFrame:
 
     for col in object_cols:
         if col in df.columns:
-            df[col] = df[col].apply(lambda x: x if isinstance(x, (dict, list)) else ([] if col in {"tags", "evidence"} else {}))
+            df[col] = df[col].apply(
+                lambda x: x
+                if isinstance(x, (dict, list))
+                else ([] if col in {"tags", "evidence"} else {})
+            )
 
     if "symbol" in df.columns:
         df["symbol"] = df["symbol"].astype(str).str.zfill(6)
@@ -169,60 +103,149 @@ def normalize_old_candidates(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def deep_find_number(obj: Any, keys: set[str]) -> Optional[float]:
-    """
-    从不确定的行情返回结构中提取价格字段。
+def safe_append_note(old_note: Any, new_note: str) -> str:
+    old = "" if old_note is None else str(old_note).strip()
+    if not old:
+        return new_note
+    return f"{old} | {new_note}"
 
-    支持常见字段：
-    - price
-    - current_price
-    - currentPrice
+
+def build_query(name: str) -> str:
+    return f"{name}最新价"
+
+
+def get_mx_data_output_path(query: str) -> Path:
+    return MX_DATA_OUTPUT_DIR / f"mx_data_{query}.xlsx"
+
+
+def run_mx_data_query(name: str) -> Path:
+    """
+    调用 mx-data 脚本查询股票最新价。
+
+    等价命令：
+    python workspace/skills/mx-data/mx_data.py "<name>最新价"
+
+    脚本执行后，预期生成：
+    workspace/logs/mx_data/output/mx_data_<name>最新价.xlsx
+    """
+    query = build_query(name)
+    output_path = get_mx_data_output_path(query)
+
+    if output_path.exists():
+        output_path.unlink()
+
+    command = [
+        sys.executable,
+        str(MX_DATA_SCRIPT.relative_to(PROJECT_ROOT)),
+        query,
+    ]
+
+    print(f"执行查询: python workspace/skills/mx-data/mx_data.py \"{query}\"")
+
+    result = subprocess.run(
+        command,
+        cwd=PROJECT_ROOT,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        shell=False,
+    )
+
+    if result.stdout:
+        print(result.stdout.strip())
+
+    if result.stderr:
+        print(result.stderr.strip())
+
+    if result.returncode != 0:
+        raise RuntimeError(f"mx-data 查询失败，returncode={result.returncode}")
+
+    time.sleep(5)
+
+    if not output_path.exists():
+        raise FileNotFoundError(f"mx-data 输出文件不存在: {output_path}")
+
+    return output_path
+
+
+def extract_latest_price_from_excel(path: Path) -> Optional[float]:
+    """
+    从 mx-data 输出 xlsx 中提取最新价。
+
+    规则：
+    - 优先读取列名为「最新价」的列
+    - 如果找不到「最新价」，则回退读取第二列
+    - 取该列第一条可转为数字的值
+    """
+    df = pd.read_excel(path)
+
+    if df.empty:
+        return None
+
+    if "最新价" in df.columns:
+        series = df["最新价"]
+    elif len(df.columns) >= 2:
+        series = df.iloc[:, 1]
+    else:
+        return None
+
+    values = pd.to_numeric(series, errors="coerce").dropna()
+
+    if values.empty:
+        return None
+
+    return float(values.iloc[0])
+
+
+def fetch_latest_price_by_name(name: str) -> tuple[Optional[float], Optional[Path], Optional[str]]:
+    """
+    根据股票名称查询最新价。
+
+    返回：
     - latest_price
-    - latestPrice
-    - lastPrice
-    - close
-    - newPrice
+    - output_path
+    - error
     """
-    if isinstance(obj, dict):
-        for key, value in obj.items():
-            if key in keys:
-                try:
-                    return float(value)
-                except Exception:
-                    pass
+    try:
+        output_path = run_mx_data_query(name)
+        latest_price = extract_latest_price_from_excel(output_path)
 
-        for value in obj.values():
-            found = deep_find_number(value, keys)
-            if found is not None:
-                return found
+        if latest_price is None:
+            return None, output_path, "未能从 xlsx 中提取最新价"
 
-    if isinstance(obj, list):
-        for item in obj:
-            found = deep_find_number(item, keys)
-            if found is not None:
-                return found
+        return latest_price, output_path, None
 
-    return None
+    except Exception as e:
+        return None, None, str(e)
 
 
-def extract_current_price(raw_data: Dict[str, Any]) -> Optional[float]:
-    price_keys = {
-        "price",
-        "current_price",
-        "currentPrice",
-        "latest_price",
-        "latestPrice",
-        "lastPrice",
-        "close",
-        "newPrice",
-    }
+def save_update_snapshot(df: pd.DataFrame, time_str: str) -> Path:
+    snapshot_path = OUTPUT_DIR / f"candidates_updated_{time_str}.json"
 
-    return deep_find_number(raw_data, price_keys)
+    records = json.loads(df.to_json(orient="records", force_ascii=False))
+    with snapshot_path.open("w", encoding="utf-8") as f:
+        json.dump(records, f, ensure_ascii=False, indent=2)
+
+    return snapshot_path
 
 
 def update_candidates(time_str: str) -> pd.DataFrame:
     """
-    从行情接口同步候选池股票信息到 workspace/pools/candidates.jsonl。
+    同步候选池中已有股票的 current_price。
+
+    流程：
+    1. 读取 workspace/pools/candidates.jsonl
+    2. 对每个候选股票读取 name
+    3. 调用：
+       python workspace/skills/mx-data/mx_data.py "<name>最新价"
+    4. 等待 5 秒
+    5. 读取：
+       workspace/logs/mx_data/output/mx_data_<name>最新价.xlsx
+    6. 从「最新价」列或第二列提取价格
+    7. 更新 candidates.jsonl 中 current_price 和 updated_at
 
     注意：
     - 本函数只负责更新候选池中已有股票的信息。
@@ -230,9 +253,7 @@ def update_candidates(time_str: str) -> pd.DataFrame:
     - 不唤醒主 Agent。
     - 不写 events。
     """
-    candidates_path = PROJECT_ROOT / "workspace" / "pools" / "candidates.jsonl"
-
-    old_candidates = read_candidates_jsonl(candidates_path)
+    old_candidates = read_candidates_jsonl(CANDIDATES_PATH)
     old_candidates = normalize_old_candidates(old_candidates)
 
     if old_candidates.empty:
@@ -241,36 +262,48 @@ def update_candidates(time_str: str) -> pd.DataFrame:
 
     for idx, candidate in old_candidates.iterrows():
         symbol = str(candidate.get("symbol", "")).zfill(6)
-        name = str(candidate.get("name", ""))
+        name = str(candidate.get("name", "")).strip()
 
-        if not symbol:
-            continue
-
-        raw_path = ask_candidate_quote(symbol, name, time_str)
-
-        with raw_path.open("r", encoding="utf-8") as f:
-            raw_data = json.load(f)
-
-        current_price = extract_current_price(raw_data)
-
-        if current_price is None:
-            print(f"未能从行情返回中提取价格，symbol={symbol}")
+        if not name:
+            print(f"候选股票缺少 name，跳过，symbol={symbol}")
             old_candidates.loc[idx, "updated_at"] = str(time_str)
-            old_candidates.loc[idx, "notes"] = f"{candidate.get('notes', '')} | 行情已请求但未提取到价格"
+            old_candidates.loc[idx, "notes"] = safe_append_note(
+                candidate.get("notes", ""),
+                "候选股票缺少 name，未查询最新价",
+            )
             continue
 
-        old_candidates.loc[idx, "current_price"] = current_price
+        latest_price, output_path, error = fetch_latest_price_by_name(name)
+
+        if error:
+            print(f"查询最新价失败，symbol={symbol}, name={name}, error={error}")
+            old_candidates.loc[idx, "updated_at"] = str(time_str)
+            old_candidates.loc[idx, "notes"] = safe_append_note(
+                candidate.get("notes", ""),
+                f"最新价查询失败: {error}",
+            )
+            continue
+
+        old_candidates.loc[idx, "current_price"] = latest_price
         old_candidates.loc[idx, "updated_at"] = str(time_str)
+
+        print(
+            f"候选股票价格已更新: symbol={symbol}, name={name}, "
+            f"current_price={latest_price}, source={output_path}"
+        )
 
     old_candidates = normalize_old_candidates(old_candidates)
 
-    candidates_path.parent.mkdir(parents=True, exist_ok=True)
+    CANDIDATES_PATH.parent.mkdir(parents=True, exist_ok=True)
     old_candidates.to_json(
-        candidates_path,
+        CANDIDATES_PATH,
         orient="records",
         lines=True,
         force_ascii=False,
     )
+
+    snapshot_path = save_update_snapshot(old_candidates, time_str.replace(":", "-"))
+    print(f"候选池更新快照已保存: {snapshot_path}")
 
     return old_candidates
 

@@ -25,7 +25,7 @@ credentials:
 ## 配置
 
 - **API Key**: 通过环境变量 `MX_APIKEY` 设置
-- **默认输出目录**: `/root/.openclaw/workspace/mx_data/output/`（自动创建）
+- **默认输出目录**: `workspace/logs/mx_data/output/`（自动创建）
 - **输出文件名前缀**: `mx_search_`
 - **输出文件**:
   - `mx_search_{query}.txt` - 提取后的纯文本结果
@@ -78,7 +78,7 @@ python ./mx_search.py "格力电器最新研报" /path/to/output
 
 脚本执行后会：
 1. 在终端格式化输出搜索结果，列出每条资讯的标题、来源、日期、内容
-2. 自动创建输出目录 `/Users/Bryan/Workspace/stock-agent/workspace/logs/mx_data/output/`
+2. 自动创建输出目录 `workspace/logs/mx_data/output/`
 3. 保存纯文本提取结果到 `.txt` 文件
 4. 保存原始 JSON 响应供二次处理
 

@@ -189,7 +189,7 @@ def run_once(
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run stock-agent once.")
+    parser = argparse.ArgumentParser(description="Run AstraTrade once.")
 
     parser.add_argument(
         "--mode",

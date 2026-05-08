@@ -24,9 +24,17 @@
 
 ## 判断规则
 
-### 1. strategy 非 active
+### 1. holding 状态检查
 
-如果 strategy.status 不是 active / pending / watching / trigger_ready / 待执行 / 执行中，返回：
+如果 holding.status 不是 holding，返回：
+
+```json
+null
+```
+
+### 2. strategy 状态检查
+
+如果 strategy.status 不是 active / watching，返回：
 
 ```json
 null
@@ -34,13 +42,13 @@ null
 
 ---
 
-### 2. 策略过期
+### 3. 策略过期
 
 如果 strategy.valid_until 存在，并且当前时间 > strategy.valid_until，返回触发。
 
 ---
 
-### 3. 止损触发
+### 4. 止损触发
 
 如果 strategy.stop_loss 存在，按类型判断：
 

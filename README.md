@@ -1,20 +1,37 @@
-# stock-agent
+<div align="center">
+  <h1>AstraTrade</h1>
+  <p><strong>面向 A 股研究、模拟交易与自动化复盘的本地 Agent 控制台</strong></p>
+  <p>
+    <a href="#快速使用">快速使用</a> ·
+    <a href="#系统结构">系统结构</a> ·
+    <a href="#常用命令">常用命令</a> ·
+    <a href="#运行模式">运行模式</a> ·
+    <a href="#数据文件">数据文件</a>
+  </p>
+  <p>
+    <img src="https://img.shields.io/badge/Python-3.10%2B-blue?logo=python" alt="Python 3.10+">
+    <img src="https://img.shields.io/badge/Dashboard-Local%20Web-20d0a2" alt="Local Dashboard">
+    <img src="https://img.shields.io/badge/LLM-OpenAI%20Compatible-7c3aed" alt="OpenAI Compatible">
+    <img src="https://img.shields.io/badge/Market-A%20Share-f59e0b" alt="A Share">
+    <img src="https://img.shields.io/badge/License-Private-lightgrey" alt="Private License">
+  </p>
+</div>
 
-一个面向 A 股研究、模拟交易和自动化复盘的本地 Agent 框架。
+---
 
-`stock-agent` 以本地 `workspace` 作为长期记忆，围绕「账户状态、持仓池、策略池、候选池、市场信息、工具调用、结构化日志」组织运行。它支持定时巡检、人工指令、事件触发、子 Agent 盯盘，并提供一个本地 dashboard 用来查看账户状态、配置投资风格、管理 API、触发任务和复盘 Agent 运行轨迹。
+`AstraTrade` 以本地 `workspace` 作为长期记忆，围绕「账户状态、持仓池、策略池、候选池、市场信息、工具调用、结构化日志」组织运行。它支持定时巡检、人工指令、事件触发、子 Agent 盯盘，并提供一个本地 dashboard 用来查看账户状态、配置投资风格、管理 API、配置 scheduler、触发任务和复盘 Agent 运行轨迹。
 
 > 免责声明：本项目用于研究、模拟交易、策略验证和自动化复盘，不构成投资建议。任何真实交易动作都应由用户自行核验行情、账户、持仓、风控和工具返回结果后再决定。
 
 ## 快速使用
 
-dashboard 是项目的默认入口。新用户建议先启动本地控制台，通过页面完成 API 配置、投资风格配置、人工指令提交、scheduler 控制和 Agent 运行轨迹复盘。
+dashboard 是项目的默认入口。新用户建议先启动本地控制台，通过页面完成 API 配置、投资风格配置、scheduler 配置、人工指令提交、scheduler 控制和 Agent 运行轨迹复盘。
 
 ### 1. 克隆项目
 
 ```bash
 git clone <your-repo-url>
-cd stock-agent
+cd AstraTrade
 ```
 
 ### 2. 一键初始化环境
@@ -70,6 +87,7 @@ dashboard 启动后可以直接完成：
 - 查看持仓池、策略池、候选池。
 - 调整投资风格。
 - 配置 API 环境变量。
+- 配置自动触发规则，包括盘前唤醒、盘中唤醒、盘后唤醒和盘中巡检。
 - 输入人工指令并触发主 Agent。
 - 查看主 Agent 调用历史。
 - 打开某次调用的详细轨迹，复盘模型输出、工具调用和最终结果。
@@ -87,6 +105,55 @@ python dashboard/server.py 8787
 ```bash
 bash dashboard/start.sh 8787
 ```
+
+## 系统结构
+
+```mermaid
+flowchart TB
+  User["用户 / 研究员"] --> Dashboard["本地 Dashboard<br/>账户状态 · 池子看板 · 投资风格 · API 配置 · 调度配置 · 调用轨迹"]
+
+  Dashboard --> Server["dashboard/server.py<br/>本地 HTTP API"]
+  Server --> Env[".env / API 配置<br/>LLM 与金融数据密钥"]
+  Server --> Style["投资风格配置<br/>config/investment_style.json"]
+  Server --> SchedulerConfig["调度配置<br/>config/scheduler.json"]
+  Server --> Scheduler["Scheduler 控制<br/>runtime/scheduler.py"]
+  Server --> Launcher["主 Agent 入口<br/>runtime/launcher.py"]
+
+  SchedulerConfig --> Scheduler
+  Scheduler --> Launcher
+  Launcher --> Context["上下文构建<br/>runtime/build_context.py"]
+  Context --> Prompt["Prompt 渲染<br/>runtime/render_prompt.py + system/"]
+  Prompt --> Loop["Agent Loop<br/>runtime/agent_loop.py"]
+
+  Loop --> LLM["OpenAI 兼容 LLM<br/>services/llm_service.py"]
+  Loop --> Tools["受控工具层<br/>read · write · edit · add · exec"]
+  Tools --> Workspace["workspace<br/>state · pools · logs · reports · skills"]
+  Workspace --> Context
+
+  Scheduler --> Wake["盘前 / 盘中 / 盘后唤醒<br/>直接调用主 Agent"]
+  Wake --> Launcher
+  Scheduler --> Patrol["盘中巡检<br/>先调用子 Agent"]
+  Patrol --> Holding["持仓盯盘子 Agent<br/>subagent/holding_follow"]
+  Patrol --> Candidate["候选池盯盘子 Agent<br/>subagent/candidate_follow"]
+  Holding --> Skills["金融 Skills<br/>mx-data · mx-search · mx-moni"]
+  Candidate --> Skills
+  Skills --> Workspace
+
+  Loop --> Trace["运行轨迹<br/>workspace/logs/agent_runs/{run_id}"]
+  Trace --> Dashboard
+```
+
+### 模块说明
+
+| 模块 | 作用 |
+| --- | --- |
+| Dashboard | 项目的默认入口，用于查看状态、提交人工指令、配置风格/API/scheduler、控制 scheduler 和复盘轨迹 |
+| `runtime/launcher.py` | 主 Agent 单次运行入口，负责进入 scheduler、manual 或 trigger 模式 |
+| `runtime/agent_loop.py` | LLM 循环与工具调用执行器，记录每一步输入、输出和工具结果 |
+| `runtime/scheduler.py` | 常驻调度器，根据 `config/scheduler.json` 执行主 Agent 唤醒和盘中子 Agent 巡检 |
+| `subagent/` | 持仓池和候选池盯盘逻辑 |
+| `workspace/` | 本地长期记忆，保存状态、池子、日志、报告和 skills |
+| `system/` | 核心提示词、模式规则、工具协议和输出协议 |
 
 ## 常用命令
 
@@ -113,11 +180,12 @@ make manual TASK="检查当前持仓和候选池，给出下一步观察重点"
 - **本地 dashboard 优先**
   - 实时查看账户状态、持仓池、策略池、候选池。
   - 配置投资风格和 API 环境变量。
+  - 配置 scheduler：盘前唤醒、盘中唤醒、盘后唤醒和盘中巡检。
   - 提交人工指令。
   - 查看主 Agent 调用历史和逐步运行轨迹。
   - 控制 scheduler 和 workspace 初始化。
 - **主 Agent 多模式运行**
-  - `scheduler`：根据交易时段和固定任务自动巡检。
+  - `scheduler`：根据固定唤醒任务和交易时段自动运行。
   - `manual`：接收人工自然语言指令，优先完成指定任务。
   - `trigger`：响应外部事件，只处理触发事件相关对象。
 - **本地 workspace 记忆**
@@ -182,9 +250,12 @@ python -m runtime.scheduler
 调度规则位于 `config/scheduler.json`，默认包含：
 
 - 工作日运行。
-- 盘前、午休、盘后、晚间固定任务。
-- 交易时段每 10 分钟运行持仓/候选池子 Agent。
+- 盘前唤醒、盘中唤醒、盘后唤醒：固定时间直接唤醒主 Agent。
+- 盘中巡检：交易时段每 10 分钟先运行持仓/候选池子 Agent，再由子 Agent 按需触发主 Agent。
+- 盘中巡检子 Agent：默认包含 `holding_follow` 和 `candidate_follow`。
 - 日志写入 `workspace/logs/scheduler/`。
+
+也可以在 dashboard 的「调度配置」页面修改这些规则。当前页面支持修改固定唤醒任务、盘中巡检时段、已有子 Agent 的启用状态和命令；不支持用户直接新增子 Agent。
 
 ### Manual 模式
 
@@ -206,6 +277,10 @@ python -m runtime.launcher \
 ```
 
 ## 子 Agent
+
+子 Agent 用于盘中巡检。scheduler 会在交易时段先调用已有子 Agent，同步持仓或候选池状态，并在满足条件时按需唤醒主 Agent。
+
+当前 dashboard 不支持用户新增子 Agent；页面只能配置已有子 Agent 的启用状态和命令。若需要新增一种子 Agent，需要在代码中实现对应模块，并同步更新调度配置与执行逻辑。
 
 ### 持仓盯盘
 
@@ -236,7 +311,7 @@ python -m subagent.candidate_follow.exec_agent --no-update
 ## 目录结构
 
 ```text
-stock-agent/
+AstraTrade/
 ├── config/
 │   ├── investment_style.json        # 投资风格配置
 │   └── scheduler.json               # 调度配置
@@ -284,7 +359,7 @@ stock-agent/
 
 ## 数据文件
 
-核心结构化文件定义在 `workspace/skills/stock-agent-schema/`。
+核心结构化文件定义在 `workspace/skills/astra-trade-schema/`。
 
 常用运行文件：
 

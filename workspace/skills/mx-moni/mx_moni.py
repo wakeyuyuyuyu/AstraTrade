@@ -6,6 +6,7 @@ import sys
 import json
 import re
 import requests
+from pathlib import Path
 from typing import Dict, Any, Optional, Tuple
 from dotenv import load_dotenv
 load_dotenv()
@@ -13,7 +14,7 @@ load_dotenv()
 # 加载环境变量
 MX_APIKEY = os.environ.get('MX_APIKEY')
 MX_API_URL = os.environ.get('MX_API_URL')
-OUTPUT_DIR = '/Users/Bryan/Workspace/stock-agent/workspace/logs/mx_data/output'
+OUTPUT_DIR = Path(__file__).resolve().parents[2] / "logs" / "mx_data" / "output"
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -38,7 +39,7 @@ def make_request(endpoint: str, body: Dict[str, Any], output_prefix: str) -> Non
         response.raise_for_status()
         result = response.json()
         
-        output_path = os.path.join(OUTPUT_DIR, f"{output_prefix}_raw.json")
+        output_path = OUTPUT_DIR / f"{output_prefix}_raw.json"
         with open(output_path, 'w', encoding='utf-8') as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
         

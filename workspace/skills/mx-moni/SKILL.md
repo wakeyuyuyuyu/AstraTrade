@@ -65,7 +65,7 @@ parameters:
 
 - **MX_APIKEY**：妙想Skills页面获取的API密钥，需保密。
 - **MX_API_URL**：模拟交易API的基础URL，默认为 `https://mkapi2.dfcfs.com/finskillshub`。
-- **默认输出目录**: `/Users/Bryan/Workspace/stock-agent/workspace/logs/mx_data/output/`（自动创建）
+- **默认输出目录**: `workspace/logs/mx_data/output/`（自动创建）
 - **输出文件名前缀**: `mx_moni_`
 - **输出文件**:
   - `mx_moni_{query}.txt` - 提取后的纯文本结果

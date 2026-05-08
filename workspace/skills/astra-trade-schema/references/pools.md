@@ -17,7 +17,7 @@ Files under `workspace/pools/` are JSONL. Append records; do not overwrite the w
   "unrealized_pnl": 0,
   "unrealized_pnl_pct": 0,
   "strategy_id": "string",
-  "status": "holding | reducing | closed | suspended",
+  "status": "holding | suspended",
   "opened_at": "YYYY-MM-DD HH:MM:SS",
   "updated_at": "YYYY-MM-DD HH:MM:SS",
   "notes": "string"
@@ -33,7 +33,7 @@ Files under `workspace/pools/` are JSONL. Append records; do not overwrite the w
   "name": "string",
   "source": "scheduler | manual | trigger | premarket | intraday | postmarket | news | ranker",
   "strategy_type": "string",
-  "status": "active | pending | watching | trigger_ready | triggered | completed | expired | invalidated",
+  "status": "active | watching",
   "priority": "low | medium | high",
   "entry_conditions": [],
   "exit_conditions": [],
@@ -65,7 +65,7 @@ Files under `workspace/pools/` are JSONL. Append records; do not overwrite the w
   "source": "scheduler | manual | trigger | premarket | intraday | postmarket | news | ranker",
   "tags": [],
   "score": 0,
-  "status": "watching | ready | promoted | rejected | expired",
+  "status": "watching | ready",
   "current_price": 0,
   "trigger": {
     "type": "price_above | price_below | pullback | breakout | manual | event",

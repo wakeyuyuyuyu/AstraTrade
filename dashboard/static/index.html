@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Stock Agent Console</title>
+    <title>AstraTrade Console</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
@@ -11,7 +11,7 @@
       <aside class="sidebar">
         <div class="brand-block">
           <p class="eyebrow">A 股自动交易 Agent</p>
-          <h1>Stock Agent</h1>
+          <h1>AstraTrade</h1>
         </div>
         <nav class="nav-list" aria-label="主导航">
           <button class="nav-item active" data-page="console" type="button">
@@ -29,6 +29,10 @@
           <button class="nav-item" data-page="api" type="button">
             <span class="nav-icon">⚙</span>
             <span>API 配置</span>
+          </button>
+          <button class="nav-item" data-page="scheduler-config" type="button">
+            <span class="nav-icon">⏱</span>
+            <span>调度配置</span>
           </button>
         </nav>
         <div class="sidebar-footer">
@@ -118,8 +122,20 @@
                   </div>
                   <span id="marketRisk" class="tag">--</span>
                 </div>
-                <p id="marketSummary" class="market-summary">--</p>
-                <div class="chip-row" id="marketChips"></div>
+                <div class="market-state-body">
+                  <div class="market-state-grid">
+                    <div>
+                      <span>交易日</span>
+                      <strong id="marketDate">--</strong>
+                    </div>
+                    <div>
+                      <span>更新</span>
+                      <strong id="marketUpdatedAt">--</strong>
+                    </div>
+                  </div>
+                  <p id="marketSummary" class="market-summary">暂无市场摘要</p>
+                  <div id="marketChips" class="chip-row market-chip-row"></div>
+                </div>
               </section>
 
               <section class="panel system-panel">
@@ -151,7 +167,13 @@
                         </div>
                       </div>
                     </div>
-                    <pre id="schedulerLogTail" class="log-tail"></pre>
+                    <div class="log-console">
+                      <div class="log-console-head">
+                        <span>Scheduler Log</span>
+                        <strong id="schedulerLogSource">--</strong>
+                      </div>
+                      <div id="schedulerLogTail" class="log-tail"></div>
+                    </div>
                     <p id="systemMessage" class="inline-message"></p>
                   </div>
 
@@ -296,6 +318,37 @@
                 </div>
                 <div id="callHistoryList" class="run-list call-history-list"></div>
               </section>
+
+              <section class="panel scheduler-summary-panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="eyebrow">Auto Trigger</p>
+                    <h2>自动触发配置</h2>
+                  </div>
+                  <button class="secondary-button nav-shortcut" data-page="scheduler-config" type="button">编辑</button>
+                </div>
+                <div class="scheduler-overview">
+                  <div class="scheduler-compact-strip">
+                    <div>
+                      <span>巡检间隔</span>
+                      <strong id="schedulerIntervalSummary">--</strong>
+                    </div>
+                    <div>
+                      <span>盘前唤醒</span>
+                      <strong id="schedulerFixedSummary">--</strong>
+                    </div>
+                    <div>
+                      <span>盘中唤醒</span>
+                      <strong id="schedulerSessionSummary">--</strong>
+                    </div>
+                    <div>
+                      <span>盘后唤醒</span>
+                      <strong id="schedulerSubagentSummary">--</strong>
+                    </div>
+                  </div>
+                  <div id="schedulerTriggerList" class="trigger-list"></div>
+                </div>
+              </section>
             </div>
           </section>
 
@@ -349,6 +402,83 @@
                 <button id="saveApiBtn" class="primary-button" type="button">保存 API 配置</button>
                 <p id="apiMessage" class="inline-message"></p>
               </div>
+            </section>
+          </section>
+
+          <section id="page-scheduler-config" class="page-view">
+            <section class="panel scheduler-config-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Scheduler</p>
+                  <h2>自动触发配置</h2>
+                </div>
+                <div class="panel-actions">
+                  <span id="schedulerConfigFile" class="tag">config/scheduler.json</span>
+                  <button id="saveSchedulerConfigBtn" class="primary-button" type="button">保存配置</button>
+                </div>
+              </div>
+
+              <div class="scheduler-config-layout">
+                <section class="scheduler-section">
+                  <div class="scheduler-section-head">
+                    <div>
+                      <span>Base</span>
+                      <h3>基础调度</h3>
+                    </div>
+                  </div>
+                  <div class="scheduler-basic-grid">
+                    <label class="scheduler-field">
+                      <span>时区</span>
+                      <input id="schedulerTimezone" type="text" placeholder="Asia/Shanghai" />
+                    </label>
+                    <label class="scheduler-field">
+                      <span>检查间隔（秒）</span>
+                      <input id="schedulerCheckInterval" type="number" min="5" max="3600" step="1" />
+                    </label>
+                    <label class="scheduler-field wide">
+                      <span>主 Agent 命令</span>
+                      <input id="schedulerMainCommand" type="text" placeholder="python -m runtime.launcher" />
+                    </label>
+                    <label class="scheduler-toggle">
+                      <input id="schedulerWeekdaysOnly" type="checkbox" />
+                      <span>仅工作日触发</span>
+                    </label>
+                  </div>
+                </section>
+
+                <section class="scheduler-section">
+                  <div class="scheduler-section-head">
+                    <div>
+                      <span>Fixed Jobs</span>
+                      <h3>固定时间任务</h3>
+                    </div>
+                    <button id="addFixedJobBtn" class="secondary-button" type="button">新增任务</button>
+                  </div>
+                  <div id="fixedJobsEditor" class="scheduler-editor-list"></div>
+                </section>
+
+                <section class="scheduler-section">
+                  <div class="scheduler-section-head">
+                    <div>
+                      <span>Market Sessions</span>
+                      <h3>交易时段巡检</h3>
+                    </div>
+                    <button id="addMarketSessionBtn" class="secondary-button" type="button">新增时段</button>
+                  </div>
+                  <div id="marketSessionsEditor" class="scheduler-editor-list"></div>
+                </section>
+
+                <section class="scheduler-section">
+                  <div class="scheduler-section-head">
+                    <div>
+                      <span>Sub Agents</span>
+                      <h3>盘中巡检子 Agent</h3>
+                    </div>
+                  </div>
+                  <div id="marketSubagentsEditor" class="scheduler-editor-list"></div>
+                </section>
+              </div>
+              <p id="schedulerConfigMessage" class="inline-message"></p>
             </section>
           </section>
         </main>
