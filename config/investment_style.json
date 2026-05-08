@@ -1,0 +1,33 @@
+{
+  "investment_period": [
+    "short_term"
+  ],
+  "risk_preference": [
+    "aggressive"
+  ],
+  "stock_selection": [
+    "trend",
+    "event_driven",
+    "quality_filter"
+  ],
+  "trading_frequency": [
+    "opportunity_driven"
+  ],
+  "decision_basis": [
+    "position_first",
+    "balanced"
+  ],
+  "position_style": [
+    "light_probe",
+    "batch_build"
+  ],
+  "take_profit_stop_loss": [
+    "strict_stop_loss",
+    "trailing_profit",
+    "logic_based"
+  ],
+  "market_adaptability": [
+    "trend_following",
+    "defensive"
+  ]
+}

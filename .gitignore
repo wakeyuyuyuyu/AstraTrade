@@ -1,0 +1,41 @@
+.DS_Store
+
+# Local secrets and machine-specific config
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+env/
+
+# Test, build, and packaging output
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+*.egg-info/
+
+# Editor metadata
+.idea/
+.vscode/
+
+# Runtime output
+scheduler.out
+dashboard/runtime/
+workspace/logs/
+workspace/reports/
+workspace/memory/
+workspace/pools/*.jsonl
+workspace/state/*.json
+subagent/holding_follow/holding_state/
+subagent/candidate_follow/candidate_state/
+
+# Local data exports
+workspace/logs/mx_data/output/

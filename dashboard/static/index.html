@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Stock Agent Console</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="app-frame">
+      <aside class="sidebar">
+        <div class="brand-block">
+          <p class="eyebrow">A 股自动交易 Agent</p>
+          <h1>Stock Agent</h1>
+        </div>
+        <nav class="nav-list" aria-label="主导航">
+          <button class="nav-item active" data-page="console" type="button">
+            <span class="nav-icon">▦</span>
+            <span>主控制台</span>
+          </button>
+          <button class="nav-item" data-page="trace" type="button">
+            <span class="nav-icon">⌁</span>
+            <span>调用轨迹</span>
+          </button>
+          <button class="nav-item" data-page="style" type="button">
+            <span class="nav-icon">◈</span>
+            <span>投资风格配置</span>
+          </button>
+          <button class="nav-item" data-page="api" type="button">
+            <span class="nav-icon">⚙</span>
+            <span>API 配置</span>
+          </button>
+        </nav>
+        <div class="sidebar-footer">
+          <span id="liveStatus" class="status-pill">LIVE</span>
+          <span id="lastUpdated" class="muted">--</span>
+        </div>
+      </aside>
+
+      <div class="content-shell">
+        <header class="topbar">
+          <div>
+            <p id="pageEyebrow" class="eyebrow">Console</p>
+            <h2 id="pageTitle">主控制台</h2>
+          </div>
+          <div class="topbar-actions">
+            <button id="refreshBtn" class="icon-button" title="立即刷新" type="button">↻</button>
+          </div>
+        </header>
+
+        <main>
+          <section id="page-console" class="page-view active">
+            <div class="dashboard-grid">
+              <section class="panel account-panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="eyebrow">Account</p>
+                    <h2>账户状态</h2>
+                  </div>
+                  <span id="accountMode" class="tag">--</span>
+                </div>
+                <div class="account-visual">
+                  <div id="assetPie" class="asset-pie">
+                    <div>
+                      <span>仓位</span>
+                      <strong id="assetPositionRatio">--</strong>
+                    </div>
+                  </div>
+                  <div class="asset-legend">
+                    <div>
+                      <span class="legend-dot market-dot"></span>
+                      <span>持仓市值</span>
+                      <strong id="assetMarketLegend">--</strong>
+                    </div>
+                    <div>
+                      <span class="legend-dot cash-dot"></span>
+                      <span>现金资产</span>
+                      <strong id="assetCashLegend">--</strong>
+                    </div>
+                    <div>
+                      <span class="legend-dot risk-dot"></span>
+                      <span>风险状态</span>
+                      <strong id="assetRiskLegend">--</strong>
+                    </div>
+                  </div>
+                </div>
+                <div class="stat-grid">
+                  <div class="stat-tile">
+                    <span>总资产</span>
+                    <strong id="totalAsset">--</strong>
+                  </div>
+                  <div class="stat-tile">
+                    <span>可用现金</span>
+                    <strong id="availableCash">--</strong>
+                  </div>
+                  <div class="stat-tile">
+                    <span>市值</span>
+                    <strong id="marketValue">--</strong>
+                  </div>
+                  <div class="stat-tile">
+                    <span>持仓数</span>
+                    <strong id="positionCount">--</strong>
+                  </div>
+                </div>
+                <div class="risk-strip">
+                  <span id="maxPositionRatio">总仓位 --</span>
+                  <span id="maxSingleStockRatio">单票 --</span>
+                  <span id="maxDailyTrades">日交易 --</span>
+                  <span id="stopTrading">风控 --</span>
+                </div>
+              </section>
+
+              <section class="panel market-panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="eyebrow">Market</p>
+                    <h2>市场状态</h2>
+                  </div>
+                  <span id="marketRisk" class="tag">--</span>
+                </div>
+                <p id="marketSummary" class="market-summary">--</p>
+                <div class="chip-row" id="marketChips"></div>
+              </section>
+
+              <section class="panel system-panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="eyebrow">System</p>
+                    <h2>系统控制</h2>
+                  </div>
+                  <span id="schedulerBadge" class="tag">--</span>
+                </div>
+                <div class="system-main">
+                  <div class="system-stack">
+                    <div class="system-control-grid">
+                      <div class="control-card">
+                        <span>Scheduler</span>
+                        <strong id="schedulerPid">--</strong>
+                        <p id="schedulerMeta">--</p>
+                        <div class="button-row">
+                          <button id="startSchedulerBtn" class="secondary-button" type="button">启动</button>
+                          <button id="stopSchedulerBtn" class="secondary-button" type="button">停止</button>
+                        </div>
+                      </div>
+                      <div class="control-card">
+                        <span>Workspace</span>
+                        <strong id="initializationStatus">--</strong>
+                        <p id="initializationMeta">清空运行数据并重置账户/市场状态</p>
+                        <div class="button-row">
+                          <button id="initializeBtn" class="danger-button" type="button">初始化</button>
+                        </div>
+                      </div>
+                    </div>
+                    <pre id="schedulerLogTail" class="log-tail"></pre>
+                    <p id="systemMessage" class="inline-message"></p>
+                  </div>
+
+                  <div class="manual-console">
+                    <div class="manual-console-head">
+                      <div>
+                        <span>Manual</span>
+                        <h3>人工指令一览</h3>
+                      </div>
+                      <span id="manualStatus" class="tag">idle</span>
+                    </div>
+                    <textarea id="manualTask" rows="4" placeholder="例如：检查当前持仓和候选池，给出下一步观察重点"></textarea>
+                    <div class="command-actions">
+                      <label>
+                        步数
+                        <input id="maxSteps" type="number" min="1" max="100" value="50" />
+                      </label>
+                      <button id="runManualBtn" class="primary-button" type="button">运行指令</button>
+                    </div>
+                    <div id="manualRecentList" class="manual-recent-list"></div>
+                    <p id="manualMessage" class="inline-message"></p>
+                  </div>
+                </div>
+              </section>
+
+              <section class="pool-deck">
+                <section class="panel table-panel holdings-panel pool-panel">
+                  <div class="panel-header">
+                    <div>
+                      <p class="eyebrow">Holdings</p>
+                      <h2>持仓池</h2>
+                    </div>
+                    <span id="holdingsCount" class="tag">0</span>
+                  </div>
+                  <div class="holding-insights">
+                    <div id="holdingsPie" class="mini-pie">
+                      <span id="holdingsPieText">--</span>
+                    </div>
+                    <div class="holding-summary">
+                      <div>
+                        <span>持仓市值</span>
+                        <strong id="holdingsMarketTotal">--</strong>
+                      </div>
+                      <div>
+                        <span>浮动盈亏</span>
+                        <strong id="holdingsPnlTotal">--</strong>
+                      </div>
+                      <div>
+                        <span>最大持仓</span>
+                        <strong id="largestHolding">--</strong>
+                      </div>
+                    </div>
+                    <div id="holdingsLegend" class="holdings-legend"></div>
+                  </div>
+                  <div class="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>代码</th>
+                          <th>名称</th>
+                          <th>数量</th>
+                          <th>成本</th>
+                          <th>现价</th>
+                          <th>盈亏</th>
+                          <th>状态</th>
+                        </tr>
+                      </thead>
+                      <tbody id="holdingsBody"></tbody>
+                    </table>
+                  </div>
+                </section>
+
+                <section class="panel table-panel strategy-panel pool-panel">
+                  <div class="panel-header">
+                    <div>
+                      <p class="eyebrow">Strategy Pool</p>
+                      <h2>策略池</h2>
+                    </div>
+                    <span id="stocksCount" class="tag">0</span>
+                  </div>
+                  <div class="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>代码</th>
+                          <th>名称</th>
+                          <th>策略</th>
+                          <th>状态</th>
+                          <th>优先级</th>
+                          <th>有效期</th>
+                        </tr>
+                      </thead>
+                      <tbody id="stocksBody"></tbody>
+                    </table>
+                  </div>
+                </section>
+
+                <section class="panel table-panel candidates-panel pool-panel">
+                  <div class="panel-header">
+                    <div>
+                      <p class="eyebrow">Candidates</p>
+                      <h2>候选池</h2>
+                    </div>
+                    <span id="candidatesCount" class="tag">0</span>
+                  </div>
+                  <div class="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>代码</th>
+                          <th>名称</th>
+                          <th>评分</th>
+                          <th>现价</th>
+                          <th>状态</th>
+                          <th>下一步</th>
+                        </tr>
+                      </thead>
+                      <tbody id="candidatesBody"></tbody>
+                    </table>
+                  </div>
+                </section>
+              </section>
+
+              <section class="panel style-summary-panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="eyebrow">Style</p>
+                    <h2>当前投资风格</h2>
+                  </div>
+                  <button class="secondary-button nav-shortcut" data-page="style" type="button">配置</button>
+                </div>
+                <div id="styleSummary" class="style-summary"></div>
+              </section>
+
+              <section class="panel call-history-panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="eyebrow">History</p>
+                    <h2>主 Agent 调用历史</h2>
+                  </div>
+                  <span id="callHistoryCount" class="tag">0</span>
+                </div>
+                <div id="callHistoryList" class="run-list call-history-list"></div>
+              </section>
+            </div>
+          </section>
+
+          <section id="page-trace" class="page-view">
+            <section class="panel trace-detail-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Trace Detail</p>
+                  <h2>Agent 调用轨迹</h2>
+                </div>
+                <span id="selectedRunBadge" class="tag">--</span>
+              </div>
+              <div class="trace-detail-layout">
+                <aside class="trace-run-column">
+                  <h3>调用历史</h3>
+                  <div id="traceRunList" class="run-list trace-run-list"></div>
+                </aside>
+                <div class="trace-main-column">
+                  <div id="traceSummary" class="trace-summary"></div>
+                  <div id="traceList" class="trace-list"></div>
+                </div>
+              </div>
+            </section>
+          </section>
+
+          <section id="page-style" class="page-view">
+            <section class="panel style-config-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Style</p>
+                  <h2>投资风格配置</h2>
+                </div>
+                <button id="saveStyleBtn" class="secondary-button" type="button">保存风格</button>
+              </div>
+              <div id="styleEditor" class="style-editor"></div>
+              <p id="styleMessage" class="inline-message"></p>
+            </section>
+          </section>
+
+          <section id="page-api" class="page-view">
+            <section class="panel api-config-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">API</p>
+                  <h2>API 配置</h2>
+                </div>
+                <span id="envFilePath" class="tag">.env</span>
+              </div>
+              <div id="apiConfigForm" class="api-config-form"></div>
+              <div class="api-actions">
+                <button id="saveApiBtn" class="primary-button" type="button">保存 API 配置</button>
+                <p id="apiMessage" class="inline-message"></p>
+              </div>
+            </section>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

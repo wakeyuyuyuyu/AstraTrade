@@ -1,0 +1,83 @@
+{
+  "timezone": "Asia/Shanghai",
+  "main_agent_command": "python -m runtime.launcher",
+  "check_interval_seconds": 50,
+  "run_on_weekdays_only": true,
+
+  "fixed_jobs": [
+    {
+      "name": "premarket_0830",
+      "enabled": true,
+      "time": "08:30",
+      "trigger_reason": "scheduled_premarket"
+    },
+    {
+      "name": "premarket_0840",
+      "enabled": true,
+      "time": "08:40",
+      "trigger_reason": "scheduled_premarket"
+    },
+    {
+      "name": "premarket_0850",
+      "enabled": true,
+      "time": "08:50",
+      "trigger_reason": "scheduled_premarket"
+    },
+    {
+      "name": "premarket_0915",
+      "enabled": true,
+      "time": "09:15",
+      "trigger_reason": "scheduled_premarket"
+    },
+    {
+      "name": "lunch_check",
+      "enabled": true,
+      "time": "12:00",
+      "trigger_reason": "scheduled_lunch_break"
+    },
+    {
+      "name": "postmarket_review",
+      "enabled": true,
+      "time": "15:30",
+      "trigger_reason": "scheduled_postmarket"
+    },
+    {
+      "name": "evening_review",
+      "enabled": true,
+      "time": "18:00",
+      "trigger_reason": "scheduled_review"
+    },
+    {
+      "name": "night_plan",
+      "enabled": true,
+      "time": "20:00",
+      "trigger_reason": "scheduled_plan"
+    }
+  ],
+
+  "market_sessions": [
+    {
+      "start": "09:30",
+      "end": "11:30",
+      "interval_minutes": 10
+    },
+    {
+      "start": "13:00",
+      "end": "15:00",
+      "interval_minutes": 10
+    }
+  ],
+
+  "market_subagents": [
+    {
+      "name": "holding_follow",
+      "enabled": true,
+      "command": "python -m subagent.holding_follow.exec_agent"
+    },
+    {
+      "name": "candidate_follow",
+      "enabled": true,
+      "command": "python -m subagent.candidate_follow.exec_agent"
+    }
+  ]
+}
