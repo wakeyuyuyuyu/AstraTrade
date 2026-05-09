@@ -167,12 +167,22 @@
                         </div>
                       </div>
                     </div>
-                    <div class="log-console">
-                      <div class="log-console-head">
-                        <span>Scheduler Log</span>
-                        <strong id="schedulerLogSource">--</strong>
+                    <div class="alarm-console">
+                      <div class="alarm-console-head">
+                        <span>Alarm</span>
+                        <strong id="alarmSource">config/alarm.json</strong>
                       </div>
-                      <div id="schedulerLogTail" class="log-tail"></div>
+                      <div class="alarm-overview">
+                        <div>
+                          <span>状态</span>
+                          <strong id="alarmGlobalStatus">--</strong>
+                        </div>
+                        <div>
+                          <span>下一次</span>
+                          <strong id="nextAlarmTime">--</strong>
+                        </div>
+                      </div>
+                      <div id="alarmList" class="alarm-list"></div>
                     </div>
                     <p id="systemMessage" class="inline-message"></p>
                   </div>
@@ -308,15 +318,16 @@
                 <div id="styleSummary" class="style-summary"></div>
               </section>
 
-              <section class="panel call-history-panel">
+              <section class="panel agent-workstream-panel">
                 <div class="panel-header">
                   <div>
-                    <p class="eyebrow">History</p>
-                    <h2>主 Agent 调用历史</h2>
+                    <p class="eyebrow">Workflow</p>
+                    <h2>工作流</h2>
+                    <p id="agentWorkstreamMeta" class="panel-subtitle">等待工作流</p>
                   </div>
-                  <span id="callHistoryCount" class="tag">0</span>
+                  <span id="agentWorkstreamStatus" class="tag">待命</span>
                 </div>
-                <div id="callHistoryList" class="run-list call-history-list"></div>
+                <div id="agentWorkstreamList" class="agent-workstream-list"></div>
               </section>
 
               <section class="panel scheduler-summary-panel">

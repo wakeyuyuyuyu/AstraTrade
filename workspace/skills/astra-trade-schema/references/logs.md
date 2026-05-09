@@ -63,25 +63,3 @@ Files under `workspace/logs/` are JSONL. Append records; do not overwrite the wh
   "created_by": "agent | manual | subagent"
 }
 ```
-
-## decisions.jsonl
-
-```json
-{
-  "decision_id": "string",
-  "timestamp": "YYYY-MM-DD HH:MM:SS",
-  "mode": "scheduler | manual | trigger",
-  "trigger_reason": "string",
-  "phase": "premarket | intraday | lunch_break | postmarket | non_trading_day | unknown",
-  "decision_type": "observe | create_candidate | create_strategy | update_strategy | buy | sell | hold | no_action | stop | review | risk_block",
-  "summary": "string",
-  "reason": "string",
-  "evidence": [],
-  "related_symbols": [],
-  "related_strategy_ids": [],
-  "trigger_event": {},
-  "actions": [],
-  "file_updates": [],
-  "run_id": "string"
-}
-```

@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import time
+from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, List
@@ -43,10 +44,13 @@ SCHEDULER_PID_PATH = RUNTIME_DIR / "scheduler.pid.json"
 SCHEDULER_LOG_PATH = RUNTIME_DIR / "scheduler.log"
 INITIALIZATION_LOG_PATH = RUNTIME_DIR / "initialization.log"
 SCHEDULER_CONFIG_PATH = CONFIG_DIR / "scheduler.json"
-SCHEDULER_SOURCE_PATH = ROOT / "runtime" / "scheduler.py"
+ALARM_CONFIG_PATH = CONFIG_DIR / "alarm.json"
+SCHEDULER_MODULE = "runtime.agent"
+SCHEDULER_SOURCE_PATH = ROOT / "runtime" / "agent.py"
 INITIALIZATION_SCRIPT_PATH = ROOT / "initialization.sh"
 ENV_PATH = ROOT / ".env"
 DEFAULT_AGENT_ENV_NAME = "stagent"
+WORKSTREAM_ACTIVE_MAX_AGE_SECONDS = 30 * 60
 
 
 def resolve_agent_python() -> str:
@@ -627,6 +631,150 @@ def api_config_payload() -> Dict[str, Any]:
     }
 
 
+def parse_alarm_datetime(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+
+    for pattern in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+        try:
+            return datetime.strptime(text, pattern)
+        except ValueError:
+            continue
+    return None
+
+
+def parse_alarm_time(value: Any) -> tuple[int, int] | None:
+    text = str(value or "").strip()
+    match = re.match(r"^(\d{1,2}):(\d{2})$", text)
+    if not match:
+        return None
+
+    hour = int(match.group(1))
+    minute = int(match.group(2))
+    if hour > 23 or minute > 59:
+        return None
+    return hour, minute
+
+
+def format_alarm_datetime(value: datetime | None) -> str:
+    if value is None:
+        return ""
+    return value.strftime("%Y-%m-%d %H:%M")
+
+
+def next_recurring_alarm_time(alarm: Dict[str, Any], now: datetime) -> datetime | None:
+    alarm_time = parse_alarm_time(alarm.get("trigger_time"))
+    if alarm_time is None:
+        return None
+
+    weekdays = alarm.get("weekdays")
+    if not isinstance(weekdays, list) or not weekdays:
+        weekdays_set = {1, 2, 3, 4, 5, 6, 7}
+    else:
+        weekdays_set = {int(item) for item in weekdays if str(item).isdigit()}
+
+    hour, minute = alarm_time
+    for offset in range(8):
+        day = now.date() + timedelta(days=offset)
+        if day.isoweekday() not in weekdays_set:
+            continue
+
+        candidate = datetime.combine(day, datetime.min.time()).replace(hour=hour, minute=minute)
+        if candidate > now:
+            return candidate
+
+    return None
+
+
+def alarm_schedule_label(alarm: Dict[str, Any]) -> str:
+    if alarm.get("run_once"):
+        return str(alarm.get("trigger_datetime") or "--")
+
+    weekdays = alarm.get("weekdays")
+    weekday_label = ""
+    if isinstance(weekdays, list) and weekdays:
+        names = {1: "一", 2: "二", 3: "三", 4: "四", 5: "五", 6: "六", 7: "日"}
+        weekday_label = "周" + "/".join(names.get(int(item), str(item)) for item in weekdays if str(item).isdigit())
+
+    return " · ".join(item for item in [str(alarm.get("trigger_time") or "--"), weekday_label] if item)
+
+
+def alarm_item_payload(alarm: Dict[str, Any], global_enabled: bool, now: datetime) -> Dict[str, Any]:
+    enabled = bool(alarm.get("enabled", True))
+    run_once = bool(alarm.get("run_once"))
+    next_at = parse_alarm_datetime(alarm.get("trigger_datetime")) if run_once else next_recurring_alarm_time(alarm, now)
+
+    status = "scheduled"
+    status_label = "待触发"
+    if not global_enabled:
+        status = "paused"
+        status_label = "全局停用"
+    elif not enabled:
+        status = "disabled"
+        status_label = "已停用"
+    elif next_at is None:
+        status = "invalid"
+        status_label = "配置异常"
+    elif run_once and next_at <= now:
+        if alarm.get("triggered_at") or alarm.get("last_triggered_at") or alarm.get("fired_at"):
+            status = "done"
+            status_label = "已触发"
+        else:
+            status = "expired"
+            status_label = "已过期"
+    elif next_at <= now + timedelta(minutes=30):
+        status = "soon"
+        status_label = "即将触发"
+
+    return {
+        "alarm_id": alarm.get("alarm_id", ""),
+        "name": alarm.get("name", "未命名 Alarm"),
+        "enabled": enabled,
+        "run_once": run_once,
+        "task": alarm.get("task", ""),
+        "schedule": alarm_schedule_label(alarm),
+        "next_at": format_alarm_datetime(next_at),
+        "status": status,
+        "status_label": status_label,
+    }
+
+
+def alarm_payload() -> Dict[str, Any]:
+    raw = read_json(ALARM_CONFIG_PATH, {"enabled": True, "alarms": []})
+    if not isinstance(raw, dict):
+        raw = {"enabled": True, "alarms": [], "error": "alarm.json 顶层必须是 object"}
+
+    alarms = raw.get("alarms") if isinstance(raw.get("alarms"), list) else []
+    global_enabled = bool(raw.get("enabled", True))
+    now = datetime.now()
+    items = [
+        alarm_item_payload(alarm, global_enabled, now)
+        for alarm in alarms
+        if isinstance(alarm, dict)
+    ]
+
+    items.sort(
+        key=lambda item: (
+            item["status"] in {"disabled", "paused", "expired", "done", "invalid"},
+            item.get("next_at") or "9999-99-99 99:99",
+            item.get("name") or "",
+        )
+    )
+    next_alarm = next((item for item in items if item["status"] in {"soon", "scheduled"}), None)
+
+    return {
+        "file": rel(ALARM_CONFIG_PATH),
+        "enabled": global_enabled,
+        "total": len(items),
+        "active_count": sum(1 for item in items if item["status"] in {"soon", "scheduled"}),
+        "next_alarm": next_alarm,
+        "items": items,
+        "updated_at": now_str(),
+        "error": raw.get("_error") or raw.get("error", ""),
+    }
+
+
 def scheduler_status() -> Dict[str, Any]:
     with STATE.lock:
         process = STATE.scheduler_process
@@ -642,7 +790,7 @@ def scheduler_status() -> Dict[str, Any]:
             record = {
                 "pid": pid,
                 "started_at": "",
-                "command": f"{AGENT_PYTHON} -m runtime.scheduler",
+                "command": f"{AGENT_PYTHON} -m {SCHEDULER_MODULE}",
                 "source": "dashboard",
                 **expected_signature,
             }
@@ -656,7 +804,7 @@ def scheduler_status() -> Dict[str, Any]:
         "running": running,
         "pid": pid if running else None,
         "started_at": record.get("started_at", "") if running else "",
-        "command": record.get("command", f"{AGENT_PYTHON} -m runtime.scheduler"),
+        "command": record.get("command", f"{AGENT_PYTHON} -m {SCHEDULER_MODULE}"),
         "python": AGENT_PYTHON,
         "source": record.get("source", "dashboard"),
         "config_file": rel(SCHEDULER_CONFIG_PATH),
@@ -686,7 +834,7 @@ def start_scheduler(auto: bool = False) -> Dict[str, Any]:
 
     status = scheduler_status()
     if status["running"]:
-        expected_command = f"{AGENT_PYTHON} -m runtime.scheduler"
+        expected_command = f"{AGENT_PYTHON} -m {SCHEDULER_MODULE}"
         if status.get("command") != expected_command or status.get("restart_required"):
             stop_scheduler()
             status = scheduler_status()
@@ -705,7 +853,7 @@ def start_scheduler(auto: bool = False) -> Dict[str, Any]:
         }
 
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
-    command = [AGENT_PYTHON, "-m", "runtime.scheduler"]
+    command = [AGENT_PYTHON, "-m", SCHEDULER_MODULE]
     command_label = " ".join(command)
 
     with SCHEDULER_LOG_PATH.open("a", encoding="utf-8") as log_file:
@@ -893,6 +1041,38 @@ def list_run_dirs(limit: int = 12) -> List[Path]:
     return dirs[:limit]
 
 
+def run_dir_activity_mtime(run_dir: Path) -> float:
+    mtimes = [file_mtime(run_dir)]
+    for path in run_dir.glob("step_*_output.json"):
+        mtimes.append(file_mtime(path))
+    for path in run_dir.glob("step_*_input.json"):
+        mtimes.append(file_mtime(path))
+    mtimes.append(file_mtime(run_dir / "run_summary.json"))
+    return max(mtimes)
+
+
+def latest_workstream_run_dir() -> Path | None:
+    runs_dir = WORKSPACE_DIR / "logs" / "agent_runs"
+    if not runs_dir.exists():
+        return None
+
+    dirs = [path for path in runs_dir.iterdir() if path.is_dir()]
+    if not dirs:
+        return None
+
+    dirs.sort(key=run_dir_activity_mtime, reverse=True)
+    return dirs[0]
+
+
+def run_dir_is_recently_active(run_dir: Path) -> bool:
+    if (run_dir / "run_summary.json").exists():
+        return False
+    activity_mtime = run_dir_activity_mtime(run_dir)
+    if activity_mtime <= 0:
+        return False
+    return time.time() - activity_mtime <= WORKSTREAM_ACTIVE_MAX_AGE_SECONDS
+
+
 def read_run_summary(run_dir: Path) -> Dict[str, Any]:
     summary_path = run_dir / "run_summary.json"
     summary = read_json(summary_path, {})
@@ -909,6 +1089,136 @@ def read_run_summary(run_dir: Path) -> Dict[str, Any]:
         "steps": summary.get("steps", 0),
         "tool_call_count": summary.get("tool_call_count", 0),
         "timestamp": summary.get("timestamp", ""),
+    }
+
+
+def agent_workstream_entry(output_file: Path) -> Dict[str, Any] | None:
+    data = read_json(output_file, {})
+    if not isinstance(data, dict):
+        return None
+
+    parsed = data.get("parsed_output", {})
+    if not isinstance(parsed, dict):
+        return None
+
+    output_type = parsed.get("type", "")
+    step = data.get("step")
+    timestamp = data.get("timestamp", "")
+
+    if output_type == "thinking":
+        text = str(parsed.get("next_action") or "").strip()
+        if not text:
+            return None
+        return {
+            "step": step,
+            "timestamp": timestamp,
+            "type": "thinking",
+            "label": "思考",
+            "text": text,
+        }
+
+    if output_type == "tool_call":
+        text = str(parsed.get("reason") or "").strip()
+        if not text:
+            return None
+        return {
+            "step": step,
+            "timestamp": timestamp,
+            "type": "tool_call",
+            "label": "执行工具",
+            "tool": parsed.get("tool", ""),
+            "text": text,
+        }
+
+    if output_type == "final":
+        text = str(parsed.get("summary") or "").strip()
+        if not text:
+            return None
+        return {
+            "step": step,
+            "timestamp": timestamp,
+            "type": "final",
+            "label": "完成",
+            "text": text,
+        }
+
+    return None
+
+
+def agent_workstream_payload(limit: int = 10) -> Dict[str, Any]:
+    run_dir = latest_workstream_run_dir()
+    if run_dir is None:
+        return {
+            "title": "工作流",
+            "status": "idle",
+            "status_label": "待命",
+            "active": False,
+            "run": None,
+            "entries": [],
+        }
+
+    summary_path = run_dir / "run_summary.json"
+    summary = read_json(summary_path, {})
+    summary = summary if isinstance(summary, dict) else {}
+
+    entries = [
+        entry
+        for entry in (agent_workstream_entry(path) for path in sorted(run_dir.glob("step_*_output.json")))
+        if entry is not None
+    ]
+
+    summary_text = str(summary.get("summary") or summary.get("final_result", {}).get("summary", "")).strip()
+    if summary_path.exists() and summary_text and not any(item.get("type") == "final" for item in entries):
+        entries.append(
+            {
+                "step": summary.get("steps"),
+                "timestamp": summary.get("timestamp", ""),
+                "type": "final",
+                "label": "完成",
+                "text": summary_text,
+            }
+        )
+
+    last_entry = entries[-1] if entries else {}
+    has_summary = summary_path.exists()
+    active = run_dir_is_recently_active(run_dir)
+    status = "idle"
+    status_label = "待命"
+
+    if active:
+        if last_entry.get("type") == "tool_call":
+            step = last_entry.get("step")
+            tool_result_path = run_dir / f"step_{int(step):03d}_tool_result.json" if isinstance(step, int) else None
+            if tool_result_path and tool_result_path.exists():
+                status = "thinking"
+                status_label = "思考中"
+            else:
+                status = "tool_call"
+                status_label = "执行工具"
+        elif last_entry.get("type") == "thinking":
+            status = "thinking"
+            status_label = "思考中"
+        else:
+            status = "preparing"
+            status_label = "准备中"
+    elif last_entry.get("type") == "final":
+        status = "final"
+        status_label = "已完成"
+
+    return {
+        "title": "工作流",
+        "status": status,
+        "status_label": status_label,
+        "active": active,
+        "run": {
+            "run_id": run_dir.name,
+            "path": rel(run_dir),
+            "mode": summary.get("mode", ""),
+            "phase": summary.get("phase", ""),
+            "timestamp": summary.get("timestamp", ""),
+            "success": summary.get("success") if has_summary else None,
+        },
+        "entries": entries[-limit:],
     }
 
 
@@ -1194,6 +1504,8 @@ def build_snapshot() -> Dict[str, Any]:
         "manual_run": manual_run_status(),
         "scheduler": scheduler_status(),
         "initialization": initialization_status(),
+        "agent_workstream": agent_workstream_payload(),
+        "alarm": alarm_payload(),
     }
 
 

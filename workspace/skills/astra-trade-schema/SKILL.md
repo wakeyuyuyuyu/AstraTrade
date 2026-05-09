@@ -31,5 +31,4 @@ description: AstraTrade workspace 的 schema 指引，用于决定在写入 stat
 - State JSON 文件可以覆盖，但必须保留关键字段。
 - 传给文件工具的 `content` 必须是合法 JSON。
 - 不得编造工具结果、行情、交易或市场数据。
-- 交易、策略变更、风控拦截、trigger 处理必须写入 decisions。
 - 子 Agent 触发事件必须写入 events。

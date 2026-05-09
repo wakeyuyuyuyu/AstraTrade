@@ -57,22 +57,52 @@ def is_command_allowed(parts: List[str]) -> tuple[bool, str]:
     return True, ""
 
 
+def ensure_workspace_dir(project_root: Path) -> Path:
+    workspace = project_root / "workspace"
+
+    if not workspace.exists() or not workspace.is_dir():
+        raise ValueError(f"workspace 目录不存在或不是目录: {workspace}")
+
+    return workspace.resolve()
+
+
 def resolve_cwd(project_root: Path, cwd: str) -> Path:
-    if not cwd:
-        return project_root
+    """
+    解析 exec 的执行目录。
 
-    path = Path(cwd)
-    if not path.is_absolute():
-        path = (project_root / cwd).resolve()
+    统一规则：
+    - 默认 cwd="." 表示项目根目录下的 workspace/
+    - 相对路径默认相对 workspace/
+    - cwd="skills" 表示 workspace/skills/
+    - cwd="__project__" 表示项目根目录，仅用于确实需要执行项目级命令时
+    - 绝对路径允许，但不能超出项目根目录
+    """
+    root = project_root.resolve()
+    workspace = ensure_workspace_dir(root)
+
+    if not cwd or cwd == ".":
+        path = workspace
+
+    elif cwd == "__project__":
+        path = root
+
     else:
-        path = path.resolve()
+        raw = Path(cwd)
 
-    if not str(path).startswith(str(project_root.resolve())):
+        if raw.is_absolute():
+            path = raw.resolve()
+        else:
+            # 兼容模型误传 workspace：cwd="workspace" 仍解析到真实 workspace/
+            if raw.parts and raw.parts[0] == "workspace":
+                path = (root / raw).resolve()
+            else:
+                path = (workspace / raw).resolve()
+
+    if not str(path).startswith(str(root)):
         raise ValueError(f"cwd 超出项目根目录: {cwd}")
 
     if not path.exists() or not path.is_dir():
-        print(cwd)
-        raise ValueError(f"cwd 不存在或不是目录: {cwd}")
+        raise ValueError(f"cwd 不存在或不是目录: {cwd} -> {path}")
 
     return path
 
@@ -92,7 +122,9 @@ def exec_command(
             "success": False,
             "tool": "exec",
             "command": command,
+            "cwd_input": cwd,
             "cwd": cwd,
+            "cwd_base": "workspace",
             "stdout": "",
             "stderr": f"命令解析失败: {exc}",
             "exit_code": -1,
@@ -104,7 +136,9 @@ def exec_command(
             "success": False,
             "tool": "exec",
             "command": command,
+            "cwd_input": cwd,
             "cwd": cwd,
+            "cwd_base": "workspace",
             "stdout": "",
             "stderr": reason,
             "exit_code": -1,
@@ -117,7 +151,9 @@ def exec_command(
             "success": False,
             "tool": "exec",
             "command": command,
+            "cwd_input": cwd,
             "cwd": cwd,
+            "cwd_base": "workspace",
             "stdout": "",
             "stderr": str(exc),
             "exit_code": -1,
@@ -131,31 +167,40 @@ def exec_command(
             text=True,
             timeout=timeout_seconds,
         )
+
         return {
             "success": completed.returncode == 0,
             "tool": "exec",
             "command": command,
+            "cwd_input": cwd,
             "cwd": str(actual_cwd),
+            "cwd_base": "project" if actual_cwd == root else "workspace",
             "stdout": completed.stdout,
             "stderr": completed.stderr,
             "exit_code": completed.returncode,
         }
+
     except subprocess.TimeoutExpired:
         return {
             "success": False,
             "tool": "exec",
             "command": command,
+            "cwd_input": cwd,
             "cwd": str(actual_cwd),
+            "cwd_base": "project" if actual_cwd == root else "workspace",
             "stdout": "",
             "stderr": f"命令执行超时（>{timeout_seconds}s）",
             "exit_code": -1,
         }
+
     except Exception as exc:
         return {
             "success": False,
             "tool": "exec",
             "command": command,
+            "cwd_input": cwd,
             "cwd": str(actual_cwd),
+            "cwd_base": "project" if actual_cwd == root else "workspace",
             "stdout": "",
             "stderr": f"命令执行异常: {exc}",
             "exit_code": -1,

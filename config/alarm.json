@@ -1,0 +1,16 @@
+{
+  "enabled": true,
+  "alarms": [
+    {
+      "alarm_id": "alarm_20260509132122",
+      "name": "周末市场状况总结",
+      "enabled": true,
+      "trigger_time": "08:00",
+      "weekdays": [
+        1
+      ],
+      "task": "总结周末期间（上周五收盘至周日）的市场状况，包括：1. 主要指数涨跌；2. 热点板块表现；3. 重要新闻与政策动态；4. 下周市场展望与关注方向。",
+      "run_once": false
+    }
+  ]
+}

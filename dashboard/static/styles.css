@@ -440,6 +440,14 @@ p {
   color: var(--ink);
 }
 
+.panel-subtitle {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 680;
+  line-height: 1.35;
+}
+
 .panel h3 {
   margin-bottom: 10px;
   color: var(--muted);
@@ -1182,17 +1190,17 @@ p {
   margin-top: auto;
 }
 
-.log-console {
+.alarm-console {
   min-width: 0;
   overflow: hidden;
-  border: 1px solid rgba(100, 168, 255, 0.18);
+  border: 1px solid rgba(246, 198, 91, 0.22);
   border-radius: 8px;
   background:
-    linear-gradient(135deg, rgba(100, 168, 255, 0.07), transparent 46%),
+    linear-gradient(135deg, rgba(246, 198, 91, 0.08), transparent 46%),
     rgba(0, 0, 0, 0.18);
 }
 
-.log-console-head {
+.alarm-console-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1201,13 +1209,13 @@ p {
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.log-console-head span {
-  color: var(--accent-3);
+.alarm-console-head span {
+  color: var(--warn);
   font-size: 11px;
   font-weight: 800;
 }
 
-.log-console-head strong {
+.alarm-console-head strong {
   color: var(--muted);
   font-size: 11px;
   font-weight: 680;
@@ -1216,64 +1224,121 @@ p {
   white-space: nowrap;
 }
 
-.log-tail {
+.alarm-overview {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 9px 10px 0;
+}
+
+.alarm-overview > div {
+  min-height: 54px;
+  border: 1px solid rgba(246, 198, 91, 0.18);
+  border-radius: 8px;
+  padding: 8px 9px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.alarm-overview span {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 720;
+}
+
+.alarm-overview strong {
+  display: block;
+  margin-top: 7px;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.alarm-list {
   display: grid;
   gap: 7px;
-  max-height: 168px;
+  max-height: 150px;
   margin: 0;
   overflow: auto;
   padding: 9px 10px 10px;
 }
 
-.scheduler-call,
-.log-empty {
+.alarm-item,
+.alarm-empty {
   border: 1px solid rgba(255, 255, 255, 0.055);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.035);
 }
 
-.scheduler-call {
+.alarm-item {
   display: grid;
-  grid-template-columns: 86px minmax(0, 1fr);
+  grid-template-columns: 78px minmax(0, 1fr);
   gap: 10px;
   align-items: center;
-  min-height: 38px;
+  min-height: 44px;
   padding: 8px 9px;
 }
 
-.scheduler-call span {
+.alarm-item > span {
   color: var(--muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
   line-height: 1.3;
 }
 
-.scheduler-call strong {
+.alarm-item strong {
+  display: block;
   color: var(--ink);
   font-size: 12px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.alarm-item small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
   line-height: 1.3;
   overflow-wrap: anywhere;
 }
 
-.scheduler-call.ok {
-  border-color: rgba(79, 224, 141, 0.22);
-  background: rgba(79, 224, 141, 0.055);
+.alarm-item.soon {
+  border-color: rgba(246, 198, 91, 0.38);
+  background: rgba(246, 198, 91, 0.08);
+  box-shadow: inset 3px 0 0 var(--warn);
 }
 
-.scheduler-call.error {
-  border-color: rgba(255, 109, 109, 0.3);
-  background: rgba(255, 109, 109, 0.075);
-}
-
-.scheduler-call.run {
+.alarm-item.scheduled {
   border-color: rgba(100, 168, 255, 0.25);
   background: rgba(100, 168, 255, 0.06);
 }
 
-.log-empty {
+.alarm-item.done {
+  border-color: rgba(79, 224, 141, 0.24);
+  background: rgba(79, 224, 141, 0.055);
+}
+
+.alarm-item.expired {
+  border-color: rgba(255, 109, 109, 0.3);
+  background: rgba(255, 109, 109, 0.075);
+}
+
+.alarm-item.disabled {
+  opacity: 0.62;
+}
+
+.alarm-empty {
   padding: 12px;
   color: var(--muted);
   font-size: 12px;
+}
+
+.alarm-empty.error {
+  color: var(--danger);
+  border-color: rgba(255, 109, 109, 0.3);
+  background: rgba(255, 109, 109, 0.075);
 }
 
 .system-stack .inline-message,
@@ -2030,7 +2095,7 @@ td.negative {
   line-height: 1.45;
 }
 
-.call-history-panel {
+.agent-workstream-panel {
   grid-column: span 8;
   min-height: 520px;
 }
@@ -2065,10 +2130,151 @@ td.negative {
   overflow: auto;
 }
 
-.call-history-list {
-  grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
-  align-items: start;
+.agent-workstream-list {
+  position: relative;
+  display: grid;
+  gap: 12px;
+  max-height: 520px;
+  overflow: auto;
   padding: 16px 18px 18px;
+}
+
+.agent-workstream-panel {
+  background:
+    linear-gradient(135deg, rgba(100, 168, 255, 0.12), rgba(255, 255, 255, 0) 46%),
+    linear-gradient(315deg, rgba(32, 208, 162, 0.1), transparent 42%),
+    var(--surface);
+}
+
+.workstream-empty,
+.workstream-item {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+
+.workstream-empty {
+  padding: 14px;
+}
+
+.workstream-empty strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.workstream-empty p {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.workstream-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 12px;
+  padding: 13px 14px;
+  overflow: hidden;
+  transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+}
+
+.workstream-item::before {
+  content: "";
+  position: absolute;
+  top: 30px;
+  bottom: -12px;
+  left: 24px;
+  width: 1px;
+  background: linear-gradient(180deg, rgba(100, 168, 255, 0.48), transparent);
+}
+
+.workstream-item.current {
+  border-color: rgba(32, 208, 162, 0.42);
+  background: linear-gradient(90deg, rgba(32, 208, 162, 0.12), rgba(100, 168, 255, 0.055));
+  transform: translateY(-1px);
+  box-shadow: inset 3px 0 0 var(--accent), 0 0 26px rgba(32, 208, 162, 0.08);
+}
+
+.workstream-item.tool_call {
+  border-color: rgba(32, 208, 162, 0.24);
+}
+
+.workstream-item.final {
+  border-color: rgba(246, 198, 91, 0.46);
+  background: linear-gradient(90deg, rgba(246, 198, 91, 0.13), rgba(255, 255, 255, 0.035));
+  box-shadow: inset 3px 0 0 var(--warn), 0 0 26px rgba(246, 198, 91, 0.08);
+}
+
+.workstream-dot {
+  position: relative;
+  z-index: 1;
+  width: 14px;
+  height: 14px;
+  margin-top: 5px;
+  border: 2px solid rgba(10, 14, 15, 0.9);
+  border-radius: 50%;
+  background: var(--accent-3);
+  box-shadow: 0 0 14px rgba(100, 168, 255, 0.45);
+}
+
+.workstream-item.current .workstream-dot {
+  animation: live-pulse 1.8s ease-in-out infinite;
+}
+
+.workstream-item.tool_call .workstream-dot {
+  background: var(--accent);
+  box-shadow: 0 0 14px rgba(32, 208, 162, 0.48);
+}
+
+.workstream-item.final .workstream-dot {
+  background: var(--warn);
+  box-shadow: 0 0 18px rgba(246, 198, 91, 0.58);
+}
+
+.workstream-content {
+  min-width: 0;
+}
+
+.workstream-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.workstream-head strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.workstream-head span {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.workstream-content p {
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.workstream-item.thinking .workstream-head strong {
+  color: var(--accent-3);
+}
+
+.workstream-item.tool_call .workstream-head strong {
+  color: var(--accent);
+}
+
+.workstream-item.final .workstream-head strong {
+  color: var(--warn);
 }
 
 .trace-run-list {
@@ -2494,7 +2700,7 @@ td.negative {
   }
 
   .style-summary-panel,
-  .call-history-panel {
+  .agent-workstream-panel {
     grid-column: 1 / -1;
   }
 
@@ -2587,7 +2793,7 @@ td.negative {
   .style-config-panel,
   .api-config-panel,
   .scheduler-config-panel,
-  .call-history-panel,
+  .agent-workstream-panel,
   .trace-detail-panel {
     grid-column: 1 / -1;
   }

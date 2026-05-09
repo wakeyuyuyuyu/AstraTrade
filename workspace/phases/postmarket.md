@@ -19,7 +19,7 @@
 ### 1. 今日动作总结
 读取：
 - logs/trades.jsonl
-- logs/decisions.jsonl
+- logs/agent_runs.jsonl
 
 总结：
 - 今日做了什么

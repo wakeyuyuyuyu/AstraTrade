@@ -158,7 +158,7 @@ flowchart TB
   Server --> Env[".env / API 配置<br/>LLM 与金融数据密钥"]
   Server --> Style["投资风格配置<br/>config/investment_style.json"]
   Server --> SchedulerConfig["调度配置<br/>config/scheduler.json"]
-  Server --> Scheduler["Scheduler 控制<br/>runtime/scheduler.py"]
+  Server --> Scheduler["Scheduler 控制<br/>runtime/agent.py"]
   Server --> Launcher["主 Agent 入口<br/>runtime/launcher.py"]
 
   SchedulerConfig --> Scheduler
@@ -192,7 +192,7 @@ flowchart TB
 | `dashboard/` | 本地控制台，用于查看状态、提交人工指令、配置风格/API/scheduler、控制 scheduler 和复盘轨迹 |
 | `runtime/launcher.py` | 主 Agent 单次运行入口，负责进入 scheduler、manual 或 trigger 模式 |
 | `runtime/agent_loop.py` | LLM 循环与工具调用执行器，记录每一步输入、输出和工具结果 |
-| `runtime/scheduler.py` | 常驻调度器，根据 `config/scheduler.json` 执行主 Agent 唤醒和盘中子 Agent 巡检 |
+| `runtime/agent.py` | 常驻调度器，根据 `config/scheduler.json` 执行主 Agent 唤醒、Alarm 和盘中子 Agent 巡检 |
 | `subagent/` | 持仓池和候选池盯盘逻辑 |
 | `workspace/` | 本地长期记忆，保存状态、池子、日志、报告和 skills |
 | `system/` | 核心提示词、模式规则、工具协议和输出协议 |
@@ -236,7 +236,7 @@ python -m runtime.launcher --mode scheduler
 启动常驻调度器：
 
 ```bash
-python -m runtime.scheduler
+python -m runtime.agent
 ```
 
 调度规则位于 `config/scheduler.json`，默认包含：
@@ -317,7 +317,7 @@ AstraTrade/
 │   ├── investment_style.py          # 投资风格生成器
 │   ├── launcher.py                  # 主 Agent 单次运行入口
 │   ├── render_prompt.py             # 系统 prompt 渲染
-│   └── scheduler.py                 # 常驻调度器
+│   └── agent.py                     # 常驻调度器与 Alarm runner
 ├── services/
 │   └── llm_service.py               # OpenAI 兼容模型调用
 ├── subagent/
@@ -361,7 +361,6 @@ AstraTrade/
 | `workspace/pools/strategies.jsonl` | 策略池 |
 | `workspace/pools/candidates.jsonl` | 候选池 |
 | `workspace/logs/trades.jsonl` | 交易记录 |
-| `workspace/logs/decisions.jsonl` | 关键决策记录 |
 | `workspace/logs/events.jsonl` | 外部事件、子 Agent 触发事件和系统事件 |
 | `workspace/logs/scheduler/` | scheduler 运行日志 |
 | `workspace/logs/agent_runs/{run_id}/` | 单次 Agent 调用的逐步轨迹 |

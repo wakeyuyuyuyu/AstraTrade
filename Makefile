@@ -26,7 +26,7 @@ run:
 	$(VENV_PYTHON) -m runtime.launcher --mode scheduler
 
 scheduler:
-	$(VENV_PYTHON) -m runtime.scheduler
+	$(VENV_PYTHON) -m runtime.agent
 
 manual:
 	@test -n "$(TASK)" || (echo 'Usage: make manual TASK="check current holdings"'; exit 1)

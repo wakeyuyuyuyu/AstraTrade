@@ -56,7 +56,6 @@ touch \
   "$POOLS_DIR/strategies.jsonl" \
   "$POOLS_DIR/candidates.jsonl" \
   "$LOGS_DIR/trades.jsonl" \
-  "$LOGS_DIR/decisions.jsonl" \
   "$LOGS_DIR/events.jsonl" \
   "$LOGS_DIR/agent_runs.jsonl"
 

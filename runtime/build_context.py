@@ -33,7 +33,6 @@ class RuntimeContext:
     candidates_summary: Dict[str, Any]
 
     # recent logs
-    recent_decisions: List[Dict[str, Any]]
     recent_trades: List[Dict[str, Any]]
     recent_events: List[Dict[str, Any]]
 
@@ -274,7 +273,6 @@ def build_context(
     strategies = read_jsonl_file(pools_dir / "strategies.jsonl")
     candidates = read_jsonl_file(pools_dir / "candidates.jsonl")
 
-    decisions = read_jsonl_file(logs_dir / "decisions.jsonl")
     trades = read_jsonl_file(logs_dir / "trades.jsonl")
     events = read_jsonl_file(logs_dir / "events.jsonl")
 
@@ -283,14 +281,12 @@ def build_context(
         holdings_for_summary = filter_related_items(holdings, related_symbol)
         strategies_for_summary = filter_related_items(strategies, related_symbol)
         candidates_for_summary = filter_related_items(candidates, related_symbol)
-        recent_decisions = filter_related_items(decisions, related_symbol)[-recent_n:]
         recent_trades = filter_related_items(trades, related_symbol)[-recent_n:]
         recent_events = filter_related_items(events, related_symbol)[-recent_n:]
     else:
         holdings_for_summary = holdings
         strategies_for_summary = strategies
         candidates_for_summary = candidates
-        recent_decisions = decisions[-recent_n:]
         recent_trades = trades[-recent_n:]
         recent_events = events[-recent_n:]
 
@@ -308,7 +304,6 @@ def build_context(
         holdings_summary=summarize_holdings(holdings_for_summary),
         strategies_summary=summarize_strategies(strategies_for_summary),
         candidates_summary=summarize_candidates(candidates_for_summary),
-        recent_decisions=recent_decisions,
         recent_trades=recent_trades,
         recent_events=recent_events,
     )
@@ -371,17 +366,12 @@ def build_context_markdown(context: RuntimeContext) -> str:
 {pretty_json(data["candidates_summary"])}
 ```
 
-## 9. 最近决策记录
-```json
-{pretty_json(data["recent_decisions"])}
-```
-
-## 10. 最近交易记录
+## 9. 最近交易记录
 ```json
 {pretty_json(data["recent_trades"])}
 ```
 
-## 11. 最近事件记录
+## 10. 最近事件记录
 ```json
 {pretty_json(data["recent_events"])}
 ```

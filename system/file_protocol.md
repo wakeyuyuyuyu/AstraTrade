@@ -15,7 +15,6 @@ workspace 是你的唯一外部记忆。
 
 ### logs
 - `logs/trades.jsonl`
-- `logs/decisions.jsonl`
 - `logs/events.jsonl`
 
 ### phases
@@ -27,7 +26,6 @@ workspace 是你的唯一外部记忆。
 
 - 生成或更新策略 → `pools/strategies.jsonl`
 - 执行交易 → `logs/trades.jsonl`
-- 关键决策 → `logs/decisions.jsonl`
 - 重要事件 → `logs/events.jsonl`
 - 更新持仓 → `pools/holdings.jsonl`
 - 更新账户状态 → `state/account_state.json`

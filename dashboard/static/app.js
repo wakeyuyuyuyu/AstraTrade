@@ -10,6 +10,8 @@ const state = {
   selectedRunId: "",
   traceCache: {},
   traceLoadingRunId: "",
+  workstreamFallbackRunId: "",
+  workstreamFallbackLoading: false,
 };
 
 const dimensionTitles = {
@@ -1274,62 +1276,83 @@ function renderManualRecentList(manual) {
   });
 }
 
-function logLineClass(line) {
-  const lower = String(line || "").toLowerCase();
-  if (lower.includes("stderr") || lower.includes("fatal") || lower.includes("error") || lower.includes("code=1") || lower.includes("failed")) return "error";
-  if (lower.includes("skip") || lower.includes("warning") || lower.includes("warn")) return "warn";
-  if (lower.includes("exit_code") && lower.includes("code=0")) return "ok";
-  if (lower.includes("run task") || lower.includes("trigger matched") || lower.includes("starting scheduler")) return "run";
-  return "";
+function alarmStatusClass(status) {
+  if (status === "soon") return "soon";
+  if (status === "scheduled") return "scheduled";
+  if (status === "expired" || status === "invalid") return "expired";
+  if (status === "done") return "done";
+  return "disabled";
 }
 
-function schedulerCallsFromTail(lines) {
-  return (Array.isArray(lines) ? lines : []).reduce((items, line) => {
-    const match = String(line || "").match(/^\[([^\]]+)\]\s*RUN task=([^\s]+)\s+command=(.*)$/);
-    if (match) {
-      items.unshift({
-        time: match[1],
-        task: match[2],
-        command: match[3],
-      });
-    }
-    return items;
-  }, []);
-}
-
-function renderSchedulerLog(scheduler) {
-  const source = $("schedulerLogSource");
-  const list = $("schedulerLogTail");
-  const calls = Array.isArray(scheduler.log_calls) && scheduler.log_calls.length
-    ? scheduler.log_calls
-    : schedulerCallsFromTail(scheduler.log_tail);
-  if (source) source.textContent = calls.length ? `最近 ${calls.length} 次` : "暂无调用";
+function renderAlarm(alarm) {
+  const source = $("alarmSource");
+  const globalStatus = $("alarmGlobalStatus");
+  const nextTime = $("nextAlarmTime");
+  const list = $("alarmList");
   if (!list) return;
+
   clearNode(list);
 
-  if (!calls.length) {
-    const empty = document.createElement("div");
-    empty.className = "log-empty";
-    empty.textContent = "暂无 scheduler 调用";
-    list.appendChild(empty);
+  if (!alarm) {
+    if (source) source.textContent = "config/alarm.json";
+    if (globalStatus) globalStatus.textContent = "服务未更新";
+    if (nextTime) nextTime.textContent = "--";
+
+    const item = document.createElement("div");
+    item.className = "alarm-empty error";
+    item.textContent = "当前 dashboard 服务未返回 Alarm 数据，请重启 dashboard 后刷新。";
+    list.appendChild(item);
     return;
   }
 
-  calls.forEach((call) => {
+  const items = Array.isArray(alarm.items) ? alarm.items : [];
+  const next = alarm.next_alarm || null;
+
+  if (source) source.textContent = alarm.file || "config/alarm.json";
+  if (globalStatus) {
+    globalStatus.textContent = alarm.enabled === false
+      ? "全局停用"
+      : `${alarm.active_count || 0}/${alarm.total || 0} 启用`;
+  }
+  if (nextTime) {
+    nextTime.textContent = next?.next_at ? compactDateTime(next.next_at) : "暂无";
+  }
+
+  if (alarm?.error) {
     const item = document.createElement("div");
-    const exitCode = Number(call.exit_code);
-    const className = Number.isFinite(exitCode) ? (exitCode === 0 ? "ok" : "error") : "run";
-    item.className = `scheduler-call ${className}`;
-    item.title = call.command || "";
+    item.className = "alarm-empty error";
+    item.textContent = alarm.error;
+    list.appendChild(item);
+    return;
+  }
 
-    const timeNode = document.createElement("span");
-    timeNode.textContent = compactDateTime(call.time);
+  if (!items.length) {
+    const item = document.createElement("div");
+    item.className = "alarm-empty";
+    item.textContent = "暂无 Alarm 配置";
+    list.appendChild(item);
+    return;
+  }
 
-    const task = document.createElement("strong");
-    task.textContent = call.task || "scheduler";
+  items.slice(0, 5).forEach((alarmItem) => {
+    const item = document.createElement("div");
+    item.className = `alarm-item ${alarmStatusClass(alarmItem.status)}`;
+    item.title = alarmItem.task || "";
 
-    item.appendChild(timeNode);
-    item.appendChild(task);
+    const time = document.createElement("span");
+    time.textContent = alarmItem.next_at ? compactDateTime(alarmItem.next_at) : alarmItem.schedule || "--";
+
+    const body = document.createElement("div");
+    const head = document.createElement("strong");
+    head.textContent = alarmItem.name || alarmItem.alarm_id || "Alarm";
+
+    const meta = document.createElement("small");
+    meta.textContent = `${alarmItem.status_label || "--"} · ${alarmItem.schedule || "--"}`;
+
+    body.appendChild(head);
+    body.appendChild(meta);
+    item.appendChild(time);
+    item.appendChild(body);
     list.appendChild(item);
   });
 }
@@ -1391,7 +1414,7 @@ function renderSystem(data) {
         : "清空运行数据并重置账户/市场状态"
   );
 
-  renderSchedulerLog(scheduler);
+  renderAlarm(data.alarm);
 
   $("startSchedulerBtn").disabled = schedulerRunning || initializationRunning;
   $("stopSchedulerBtn").disabled = !schedulerRunning || initializationRunning;
@@ -1463,24 +1486,193 @@ function createRunCard(run, options = {}) {
   return item;
 }
 
-function renderCallHistory(data) {
-  const logs = data.logs || {};
-  const runs = logs.run_dirs || [];
-  const list = $("callHistoryList");
-  clearNode(list);
-  text("callHistoryCount", `${runs.length} 条`);
+function workstreamStatusClass(status) {
+  if (status === "final") return "success";
+  if (status === "tool_call") return "running";
+  if (status === "thinking" || status === "preparing") return "";
+  return "";
+}
 
-  if (!runs.length) {
-    const item = document.createElement("div");
-    item.className = "run-item";
-    item.innerHTML = "<strong>暂无调用记录</strong><p>等待主 Agent 产生运行日志</p>";
-    list.appendChild(item);
+function workflowModeLabel(mode) {
+  const normalized = String(mode || "").toLowerCase();
+  if (normalized === "manual") return "人工模式";
+  if (normalized === "scheduler") return "定时调度";
+  if (normalized === "trigger") return "触发模式";
+  return "主 Agent";
+}
+
+function workflowRunMeta(run) {
+  const runId = String(run?.run_id || "");
+  const matched = runId.match(/^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})_([a-zA-Z_]+)$/);
+  if (matched) {
+    return {
+      time: `${matched[1]}年${matched[2]}月${matched[3]}日，${matched[4]}:${matched[5]}`,
+      mode: workflowModeLabel(matched[7]),
+    };
+  }
+
+  return {
+    time: run?.timestamp ? compactDateTime(run.timestamp) : "等待工作流",
+    mode: workflowModeLabel(run?.mode),
+  };
+}
+
+function traceToWorkstream(trace, fallbackRun) {
+  const steps = Array.isArray(trace.steps) ? trace.steps : [];
+  const entries = steps
+    .filter((step) => step.kind !== "tool" && ["thinking", "tool_call", "final"].includes(step.type))
+    .map((step) => {
+      if (step.type === "thinking") {
+        return {
+          step: step.step,
+          timestamp: step.timestamp,
+          type: "thinking",
+          label: "思考",
+          text: step.next_action || step.body || "",
+        };
+      }
+      if (step.type === "tool_call") {
+        return {
+          step: step.step,
+          timestamp: step.timestamp,
+          type: "tool_call",
+          label: "执行工具",
+          tool: step.tool || "",
+          text: step.reason || step.body || "",
+        };
+      }
+      return {
+        step: step.step,
+        timestamp: step.timestamp,
+        type: "final",
+        label: "完成",
+        text: step.summary || step.body || "",
+      };
+    })
+    .filter((entry) => entry.text);
+
+  const last = entries[entries.length - 1] || {};
+  const lastStep = steps[steps.length - 1] || {};
+  const active = !entries.some((entry) => entry.type === "final");
+  const status = active ? (lastStep.kind === "tool" ? "thinking" : (last.type || "preparing")) : "final";
+  const run = trace.run || fallbackRun || {};
+
+  return {
+    status,
+    status_label: status === "tool_call" ? "执行工具" : status === "thinking" ? "思考中" : active ? "准备中" : "已完成",
+    active,
+    run,
+    entries: entries.slice(-10),
+  };
+}
+
+function renderAgentWorkstreamStream(stream) {
+  const list = $("agentWorkstreamList");
+  const badge = $("agentWorkstreamStatus");
+  const metaNode = $("agentWorkstreamMeta");
+  if (!list) return;
+
+  if (badge) {
+    badge.textContent = stream.status_label || "待命";
+    badge.className = `tag ${workstreamStatusClass(stream.status)}`.trim();
+  }
+
+  clearNode(list);
+
+  const run = stream.run || {};
+  const entries = Array.isArray(stream.entries) ? stream.entries : [];
+  const workflowMeta = workflowRunMeta(run);
+  if (metaNode) {
+    metaNode.textContent = run.run_id || entries.length ? `${workflowMeta.time} · ${workflowMeta.mode}` : "等待工作流";
+  }
+  const orderedEntries = entries.slice().reverse();
+
+  if (!entries.length) {
+    const empty = document.createElement("div");
+    empty.className = "workstream-empty";
+    const title = document.createElement("strong");
+    title.textContent = "暂无工作轨迹";
+    const body = document.createElement("p");
+    body.textContent = "主 Agent 开始运行后，这里会实时显示 next_action、tool_call reason 和最终 summary。";
+    empty.appendChild(title);
+    empty.appendChild(body);
+    list.appendChild(empty);
     return;
   }
 
-  runs.forEach((run) => {
-    list.appendChild(createRunCard(run, { active: run.run_id === state.selectedRunId }));
+  orderedEntries.forEach((entry, index) => {
+    const item = document.createElement("div");
+    item.className = `workstream-item ${entry.type || ""}${index === 0 ? " current" : ""}`.trim();
+
+    const rail = document.createElement("span");
+    rail.className = "workstream-dot";
+
+    const content = document.createElement("div");
+    content.className = "workstream-content";
+
+    const head = document.createElement("div");
+    head.className = "workstream-head";
+
+    const label = document.createElement("strong");
+    label.textContent = entry.label || "--";
+
+    const meta = document.createElement("span");
+    const parts = [];
+    if (entry.step) parts.push(`Step ${entry.step}`);
+    if (entry.tool) parts.push(entry.tool);
+    if (entry.timestamp) parts.push(compactDateTime(entry.timestamp));
+    meta.textContent = parts.join(" · ");
+
+    const body = document.createElement("p");
+    body.textContent = entry.text || "暂无内容";
+
+    head.appendChild(label);
+    head.appendChild(meta);
+    content.appendChild(head);
+    content.appendChild(body);
+    item.appendChild(rail);
+    item.appendChild(content);
+    list.appendChild(item);
   });
+}
+
+async function loadWorkstreamFallback(data) {
+  if (state.workstreamFallbackLoading) return;
+  const run = data.logs?.run_dirs?.[0];
+  if (!run?.run_id) return;
+
+  state.workstreamFallbackLoading = true;
+  state.workstreamFallbackRunId = run.run_id;
+
+  try {
+    const response = await fetch(`/api/trace?run_id=${encodeURIComponent(run.run_id)}`, { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const trace = await response.json();
+    if (state.workstreamFallbackRunId === run.run_id) {
+      renderAgentWorkstreamStream(traceToWorkstream(trace, run));
+    }
+  } catch (error) {
+    console.error(error);
+  } finally {
+    state.workstreamFallbackLoading = false;
+  }
+}
+
+function renderAgentWorkstream(data) {
+  const stream = data.agent_workstream || null;
+  if (stream && (stream.run || (Array.isArray(stream.entries) && stream.entries.length))) {
+    renderAgentWorkstreamStream(stream);
+    return;
+  }
+
+  renderAgentWorkstreamStream({
+    status: "preparing",
+    status_label: "同步中",
+    active: false,
+    run: data.logs?.run_dirs?.[0] || null,
+    entries: [],
+  });
+  loadWorkstreamFallback(data);
 }
 
 function renderTraceRunList(data) {
@@ -1857,7 +2049,7 @@ function openTrace(runId) {
   if (!runId) return;
   state.selectedRunId = runId;
   switchPage("trace");
-  renderCallHistory(state.snapshot || {});
+  renderAgentWorkstream(state.snapshot || {});
   renderTracePage();
   loadTrace(runId);
 }
@@ -1895,7 +2087,7 @@ function render(data) {
       state.selectedRunId = data.logs?.run_dirs?.[0]?.run_id || "";
     }
   }
-  renderCallHistory(data);
+  renderAgentWorkstream(data);
   renderTraceRunList(data);
 
   if (!Object.keys(state.styleOptions).length) {

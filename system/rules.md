@@ -36,14 +36,12 @@
 - `pools/candidates.jsonl` 只保存尚未买入、仍处于观察或待触发状态的候选股票
 - 候选池股票触发买入并完成交易记录后，必须从 `pools/candidates.jsonl` 删除
 - 如果候选股票只是升级为策略但尚未买入，从候选池删除，并在 `pools/strategies.jsonl` 中保留策略
-- 删除候选股票前，必须先确认对应买入决策已经写入 `logs/decisions.jsonl`
 - 涉及买入交易时，必须额外追加 `logs/trades.jsonl`
 
 ## 持仓池规则
 
 - `pools/holdings.jsonl` 只保存当前仍有持仓数量的股票
 - 持仓股票全部卖出后，如果持仓数量为 0，必须从 `pools/holdings.jsonl` 删除
-- 清仓前必须确认卖出决策已经写入 `logs/decisions.jsonl`
 - 涉及卖出交易时，必须额外追加 `logs/trades.jsonl`
 - 清仓后如对应策略已完成或失效，也必须同步处理策略池
 
@@ -52,7 +50,6 @@
 - `pools/strategies.jsonl` 只保存尚未执行完成、仍需跟踪的有效策略
 - 策略执行完成后，必须从 `pools/strategies.jsonl` 删除
 - 策略失效、过期或被明确终止后，也应从 `pools/strategies.jsonl` 删除
-- 删除策略前，必须先确认对应决策已经写入 `logs/decisions.jsonl`
 - 如果策略执行涉及买入或卖出，必须额外追加 `logs/trades.jsonl`
 
 ## 工具与数据规则
@@ -60,3 +57,12 @@
 - 行情、财务、新闻、公告、研报等外部信息必须通过工具或 skill 获取
 - 使用 skill 前，必须先读取对应 `SKILL.md`
 - 关键结论必须能追溯到工具结果、文件记录或用户输入
+
+## Alarm 规则
+
+- 当任务需要在未来某个时间再次检查、复盘、确认或继续执行时，可以创建 alarm。
+- alarm 用于在指定时间以 manual 形式唤醒主 Agent，并传入一条明确的自然语言任务。
+- 创建 alarm 前，必须判断该任务是否真的需要未来唤醒；不要为普通即时任务、无明确时间点的任务或低价值提醒创建 alarm。
+- 创建 alarm 时，必须使用 `astra-trade-alarm` skill，不得直接手动修改 `config/alarm.json`。
+- alarm 任务内容必须具体、可执行，并说明要检查的对象、依据和预期输出。
+- 不得创建过于频繁、重复或无明确目的的 alarm。
