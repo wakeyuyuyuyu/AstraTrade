@@ -1,7 +1,6 @@
 <div align="center">
   <img src="assets/astra-trade-logo.png" alt="AstraTrade Logo" width="420">
   <br>
-  <h1>AstraTrade</h1>
   <p><strong>面向 A 股研究、模拟交易与自动化决策的本地 Agent 控制台</strong></p>
   <p>
     <a href="https://github.com/BryanGao-1216/AstraTrade">GitHub Repository</a>
