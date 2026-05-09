@@ -206,7 +206,7 @@ def build_agent_entry_block(
         "- 不要输出多个 JSON。",
         "- 不要解释系统设计。",
         "- 不要输出与本轮任务无关的内容。",
-        "- 禁止输出 Markdown 代码块。",
+        "- 禁止输出多个 Markdown 代码块。",
     ])
 
     lines.extend([

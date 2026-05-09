@@ -163,7 +163,7 @@ def build_error_retry_message(
         "3. final\n\n"
         "要求：\n"
         "- 必须能被 json.loads() 直接解析\n"
-        "- 不要输出 Markdown 代码块\n"
+        "- 不要输出多个 Markdown 代码块\n"
         "- 不要输出 JSON 之外的文字\n"
         "- 不要一次输出多个 JSON\n"
         "- thinking 必须包含 type、mode、phase、knowns、unknowns、next_action\n"
