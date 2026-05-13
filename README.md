@@ -36,6 +36,12 @@
 | 主 Agent / 子 Agent 协作 | 主 Agent 负责综合判断、文件更新和最终决策；持仓/候选子 Agent 负责盘中盯盘，满足条件时唤醒主 Agent |
 | 模型分层配置 | 主 Agent 使用 `LLM_*` 配置；子 Agent 使用 `SUB_LLM_*` 配置 |
 
+## 系统流程图
+
+<p align="center">
+  <img src="assets/astra-trade-system-architecture.png" alt="AstraTrade System Architecture">
+</p>
+
 ## 项目简介
 
 `AstraTrade` 是一个本地优先的 A 股研究与模拟交易 Agent 系统，用于自动化市场盯盘、策略制定、模拟交易记录和复盘分析。系统以 `workspace/` 作为本地工作空间，围绕账户状态、市场状态、持仓池、策略池、候选池组织日常工作。
