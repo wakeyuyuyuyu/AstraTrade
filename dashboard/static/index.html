@@ -123,18 +123,74 @@
                   <span id="marketRisk" class="tag">--</span>
                 </div>
                 <div class="market-state-body">
-                  <div class="market-state-grid">
-                    <div>
-                      <span>交易日</span>
-                      <strong id="marketDate">--</strong>
+                  <div class="market-overview">
+                    <div class="market-state-grid">
+                      <div>
+                        <span>交易日</span>
+                        <strong id="marketDate">--</strong>
+                      </div>
+                      <div>
+                        <span>更新</span>
+                        <strong id="marketUpdatedAt">--</strong>
+                      </div>
                     </div>
-                    <div>
-                      <span>更新</span>
-                      <strong id="marketUpdatedAt">--</strong>
+                    <div class="sentiment-card">
+                      <div id="marketSentimentGauge" class="sentiment-gauge">
+                        <div class="sentiment-segments" aria-hidden="true">
+                          <i></i>
+                          <i></i>
+                          <i></i>
+                          <i></i>
+                          <i></i>
+                          <i></i>
+                          <i></i>
+                          <i></i>
+                          <i></i>
+                          <i></i>
+                        </div>
+                        <div class="sentiment-meter">
+                          <span>市场情绪</span>
+                          <strong id="marketSentimentScore">--</strong>
+                          <small id="marketSentimentLabel">--</small>
+                        </div>
+                        <div class="sentiment-scale" aria-hidden="true">
+                          <span>0</span>
+                          <span>100</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                   <p id="marketSummary" class="market-summary">暂无市场摘要</p>
-                  <div id="marketChips" class="chip-row market-chip-row"></div>
+                  <div class="market-section-grid">
+                    <div class="market-section hot">
+                      <div class="market-section-head">
+                        <span>热点</span>
+                        <strong id="marketHotCount">0</strong>
+                      </div>
+                      <div id="marketHotTopics" class="market-item-list"></div>
+                    </div>
+                    <div class="market-section watch">
+                      <div class="market-section-head">
+                        <span>关注</span>
+                        <strong id="marketWatchCount">0</strong>
+                      </div>
+                      <div id="marketWatchSectors" class="market-item-list"></div>
+                    </div>
+                    <div class="market-section avoid">
+                      <div class="market-section-head">
+                        <span>回避</span>
+                        <strong id="marketAvoidCount">0</strong>
+                      </div>
+                      <div id="marketAvoidSectors" class="market-item-list"></div>
+                    </div>
+                    <div class="market-section events">
+                      <div class="market-section-head">
+                        <span>事件</span>
+                        <strong id="marketEventCount">0</strong>
+                      </div>
+                      <div id="marketKeyEvents" class="market-event-list"></div>
+                    </div>
+                  </div>
                 </div>
               </section>
 

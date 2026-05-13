@@ -9,7 +9,7 @@
     ·
     <a href="#控制台能力">控制台能力</a>
     ·
-    <a href="#系统结构">系统结构</a>
+    <a href="#系统流程图">系统流程图</a>
     ·
     <a href="#运行模式">运行模式</a>
     ·
@@ -170,43 +170,6 @@ python dashboard/server.py 8787
 
 ```bash
 make manual TASK="检查当前持仓和候选池，给出下一步观察重点"
-```
-
-## 系统结构
-
-```mermaid
-flowchart TB
-  User["用户 / 研究员"] --> Dashboard["本地 Dashboard<br/>账户状态 · 市场状态 · 池子看板 · 投资风格 · API 配置 · 调度配置 · 调用轨迹"]
-
-  Dashboard --> Server["dashboard/server.py<br/>本地 HTTP API"]
-  Server --> Env[".env / API 配置<br/>LLM 与金融数据密钥"]
-  Server --> Style["投资风格配置<br/>config/investment_style.json"]
-  Server --> SchedulerConfig["调度配置<br/>config/scheduler.json"]
-  Server --> Scheduler["Scheduler 控制<br/>runtime/agent.py"]
-  Server --> Launcher["主 Agent 入口<br/>runtime/launcher.py"]
-
-  SchedulerConfig --> Scheduler
-  Scheduler --> Launcher
-  Launcher --> Context["上下文构建<br/>runtime/build_context.py"]
-  Context --> Prompt["Prompt 渲染<br/>runtime/render_prompt.py + system/"]
-  Prompt --> Loop["Agent Loop<br/>runtime/agent_loop.py"]
-
-  Loop --> LLM["OpenAI 兼容 LLM<br/>services/llm_service.py"]
-  Loop --> Tools["受控工具层<br/>read · write · edit · add · exec · schema 校验"]
-  Tools --> Workspace["workspace<br/>state · pools · logs · reports · skills"]
-  Workspace --> Context
-
-  Scheduler --> Wake["盘前 / 盘中 / 盘后唤醒<br/>直接调用主 Agent"]
-  Wake --> Launcher
-  Scheduler --> Patrol["盘中巡检<br/>先调用子 Agent"]
-  Patrol --> Holding["持仓盯盘子 Agent<br/>subagent/holding_follow"]
-  Patrol --> Candidate["候选池盯盘子 Agent<br/>subagent/candidate_follow"]
-  Holding --> Skills["金融 Skills<br/>mx-data · mx-search · mx-moni"]
-  Candidate --> Skills
-  Skills --> Workspace
-
-  Loop --> Trace["运行轨迹<br/>workspace/logs/agent_runs/{run_id}<br/>step · summary · trace"]
-  Trace --> Dashboard
 ```
 
 ## 模块说明

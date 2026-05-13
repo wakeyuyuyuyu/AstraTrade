@@ -151,6 +151,18 @@ const marketRiskLabels = {
   unknown: "未知风险",
 };
 
+const marketSentimentLabels = {
+  bullish: "乐观",
+  positive: "偏暖",
+  warm: "偏暖",
+  neutral: "中性",
+  cautious: "谨慎",
+  weak: "偏弱",
+  bearish: "悲观",
+  negative: "悲观",
+  unknown: "未知",
+};
+
 function compactDateTime(value) {
   const raw = String(value || "").trim();
   if (!raw) return "--";
@@ -465,7 +477,7 @@ function renderAccount(data) {
 }
 
 function renderMarket(data) {
-  if (!$("marketRisk") && !$("marketChips")) return;
+  if (!$("marketRisk") && !$("marketSummary")) return;
   const market = data.market || {};
   const status = marketStatus(market);
   setTag("marketRisk", status.label, status.className, status.title);
@@ -473,31 +485,96 @@ function renderMarket(data) {
   text("marketUpdatedAt", compactDateTime(market.updated_at));
   text("marketSummary", market.summary || "暂无市场摘要");
 
-  const chips = $("marketChips");
-  if (!chips) return;
-  clearNode(chips);
-  const groups = [
-    ["热点", market.hot_topics],
-    ["关注", market.watch_sectors],
-    ["回避", market.avoid_sectors],
-    ["事件", market.key_events],
-  ];
+  renderMarketSentiment(market);
+  renderMarketItems("marketHotTopics", "marketHotCount", market.hot_topics, "暂无热点");
+  renderMarketItems("marketWatchSectors", "marketWatchCount", market.watch_sectors, "暂无关注方向");
+  renderMarketItems("marketAvoidSectors", "marketAvoidCount", market.avoid_sectors, "暂无回避方向");
+  renderMarketEvents("marketKeyEvents", "marketEventCount", market.key_events);
+}
 
-  groups.forEach(([label, values]) => {
-    (Array.isArray(values) ? values : []).slice(0, 6).forEach((value) => {
-      const chip = document.createElement("span");
-      chip.className = "chip";
-      chip.textContent = `${label}: ${shortText(value)}`;
-      chip.title = chip.textContent;
-      chips.appendChild(chip);
+function renderMarketSentiment(market) {
+  const sentiment = market.market_sentiment || market.sentiment || {};
+  const rawScore = Number(sentiment.score ?? market.market_sentiment_score ?? market.sentiment_score);
+  const score = Number.isFinite(rawScore) ? clamp(rawScore, 0, 100) : null;
+  const labelKey = String(sentiment.label || market.sentiment_label || "unknown").toLowerCase();
+  const label = marketSentimentLabels[labelKey] || sentiment.label || market.sentiment_label || "未知";
+  const gauge = $("marketSentimentGauge");
+
+  if (gauge) {
+    gauge.classList.toggle("empty", score === null);
+    const activeSegments = score === null ? 0 : Math.max(1, Math.ceil(score / 10));
+    gauge.querySelectorAll(".sentiment-segments i").forEach((segment, index) => {
+      segment.classList.toggle("active", index < activeSegments);
     });
+  }
+  text("marketSentimentScore", score === null ? "--" : `${Math.round(score)}`);
+  text("marketSentimentLabel", label);
+}
+
+function renderMarketItems(containerId, countId, values, emptyText) {
+  const node = $(containerId);
+  const items = Array.isArray(values) ? values : [];
+  text(countId, items.length);
+  if (!node) return;
+  clearNode(node);
+
+  items.slice(0, 8).forEach((value) => {
+    const item = document.createElement("span");
+    item.className = "market-item";
+    item.textContent = shortText(value);
+    item.title = item.textContent;
+    node.appendChild(item);
   });
 
-  if (!chips.childElementCount) {
-    const chip = document.createElement("span");
-    chip.className = "chip";
-    chip.textContent = "暂无标签";
-    chips.appendChild(chip);
+  if (!node.childElementCount) {
+    const item = document.createElement("span");
+    item.className = "market-item muted-item";
+    item.textContent = emptyText;
+    node.appendChild(item);
+  }
+}
+
+function eventTitle(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value.event || value.title || value.name || value.summary || JSON.stringify(value);
+  }
+  return shortText(value);
+}
+
+function eventMeta(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+  return [value.date, value.impact || value.reason || value.note].filter(Boolean).join(" · ");
+}
+
+function renderMarketEvents(containerId, countId, values) {
+  const node = $(containerId);
+  const events = Array.isArray(values) ? values : [];
+  text(countId, events.length);
+  if (!node) return;
+  clearNode(node);
+
+  events.slice(0, 5).forEach((value) => {
+    const item = document.createElement("div");
+    item.className = "market-event";
+    const title = document.createElement("strong");
+    title.textContent = eventTitle(value);
+    item.appendChild(title);
+
+    const metaText = eventMeta(value);
+    if (metaText) {
+      const meta = document.createElement("span");
+      meta.textContent = metaText;
+      item.appendChild(meta);
+    }
+
+    node.appendChild(item);
+  });
+
+  if (!node.childElementCount) {
+    const item = document.createElement("div");
+    item.className = "market-event muted-item";
+    item.textContent = "暂无关键事件";
+    node.appendChild(item);
   }
 }
 
