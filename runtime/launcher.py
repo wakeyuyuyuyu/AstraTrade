@@ -2,15 +2,20 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict
 
 from dotenv import load_dotenv
 
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from runtime.build_context import build_context
 from runtime.render_prompt import render_system_prompt
-from runtime.agent_loop import run_agent_loop
 
 
 VALID_MODES = {"scheduler", "manual", "trigger"}
@@ -111,10 +116,16 @@ def run_once(
     extra_instructions: str | None = None,
     max_steps: int = 30,
     max_consecutive_thinking: int = 2,
+    test: bool = False,
 ) -> dict:
+    from runtime.agent_loop import run_agent_loop
+
     load_dotenv()
 
     mode = resolve_mode(mode, user_task=user_task)
+    if test and mode != "manual":
+        raise ValueError("test 模式目前只支持 manual，请传入 --task 或 --mode manual")
+
     trigger_reason = trigger_reason or default_trigger_reason(mode)
     trigger_event = trigger_event or {}
 
@@ -126,10 +137,13 @@ def run_once(
     workspace_dir = root / "workspace"
     skills_dir = workspace_dir / "skills"
     reports_dir = workspace_dir / "reports"
-    logs_dir = workspace_dir / "logs"
+    logs_dir = root / "test" / "logs" if test else workspace_dir / "logs"
 
     now = datetime.now()
-    run_id = f"{now.strftime('%Y%m%d_%H%M%S')}_{mode}"
+    if test:
+        run_id = f"{now.strftime('%Y%m%d_%H%M%S_%f')}_{mode}_test"
+    else:
+        run_id = f"{now.strftime('%Y%m%d_%H%M%S')}_{mode}"
 
     context = build_context(
         workspace_dir=workspace_dir,
@@ -182,6 +196,7 @@ def run_once(
             "success": result.get("success", False),
             "phase": result.get("phase", "unknown"),
             "summary": result.get("summary", ""),
+            "test": test,
         },
     )
 
@@ -231,6 +246,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=2,
         help="连续 thinking 最大次数",
     )
+    parser.add_argument(
+        "--test",
+        "--test-mode",
+        dest="test",
+        action="store_true",
+        help="测试模式：仅 manual 调用使用，将 agent loop 日志写入 test/logs。",
+    )
 
     return parser
 
@@ -253,6 +275,7 @@ if __name__ == "__main__":
         extra_instructions=args.extra_instructions,
         max_steps=args.max_steps,
         max_consecutive_thinking=args.max_consecutive_thinking,
+        test=args.test,
     )
 
     # print(json.dumps(result, ensure_ascii=False, indent=2))

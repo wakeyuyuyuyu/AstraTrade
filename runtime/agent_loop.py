@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Dict, List
 
 from services.llm_service import call_llm
@@ -19,6 +20,23 @@ DEFAULT_FINAL_FIELDS = {
     "decisions": [],
     "file_updates": [],
     "next_todos": [],
+}
+
+
+OUTPUT_FORMAT_REQUIREMENTS = {
+    "thinking": ["type", "mode", "phase", "knowns", "unknowns", "next_action"],
+    "tool_call": ["type", "tool", "args", "reason"],
+    "final": [
+        "type",
+        "mode",
+        "phase",
+        "summary",
+        "actions",
+        "tool_calls",
+        "decisions",
+        "file_updates",
+        "next_todos",
+    ],
 }
 
 
@@ -97,6 +115,31 @@ def normalize_final_result(result: Dict[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
+def assess_model_output_format(parsed: Dict[str, Any]) -> tuple[bool, str]:
+    output_type = parsed.get("type")
+
+    if output_type == "error":
+        return False, parsed.get("error", "模型输出无法解析为合法 JSON")
+
+    if output_type not in OUTPUT_FORMAT_REQUIREMENTS:
+        return False, f"未知 type: {output_type}"
+
+    missing = [key for key in OUTPUT_FORMAT_REQUIREMENTS[output_type] if key not in parsed]
+    if missing:
+        return False, f"{output_type} 缺少字段: {', '.join(missing)}"
+
+    if output_type == "tool_call" and not isinstance(parsed.get("args"), dict):
+        return False, "tool_call.args 必须是 JSON object"
+
+    if output_type == "final":
+        list_fields = ["actions", "tool_calls", "decisions", "file_updates", "next_todos"]
+        bad_fields = [key for key in list_fields if not isinstance(parsed.get(key), list)]
+        if bad_fields:
+            return False, f"final 字段必须是数组: {', '.join(bad_fields)}"
+
+    return True, ""
+
+
 def build_final_result(
     *,
     success: bool,
@@ -162,10 +205,9 @@ def build_error_retry_message(
         "2. tool_call\n"
         "3. final\n\n"
         "要求：\n"
-        "- 必须能被 json.loads() 直接解析\n"
-        "- 不要输出多个 Markdown 代码块\n"
+        "- 必须能被 json.loads() 直接解析，或是单个可提取的 Markdown JSON 代码块\n"
+        "- 不要输出多个 JSON 代码块\n"
         "- 不要输出 JSON 之外的文字\n"
-        "- 不要一次输出多个 JSON\n"
         "- thinking 必须包含 type、mode、phase、knowns、unknowns、next_action\n"
         "- tool_call 必须包含 type、tool、args、reason\n"
         "- final 必须包含 type、mode、phase、summary、actions、tool_calls、decisions、file_updates、next_todos\n"
@@ -246,7 +288,7 @@ def build_continue_message_after_thinking() -> str:
 
 
 def build_tool_result_message(result: Dict[str, Any]) -> str:
-    print(f"tool result: {result}")
+    # print(f"tool result: {result}")
     return (
         "以下是你刚才请求的工具执行结果。"
         "请基于结果继续下一步，只能输出 thinking、tool_call 或 final 三种 JSON。\n\n"
@@ -268,23 +310,50 @@ def save_run_summary(
     final_result: Dict[str, Any],
     steps: int,
     tool_call_history: List[Dict[str, Any]] | None = None,
+    duration_seconds: float | None = None,
+    agent_trace: List[Dict[str, Any]] | None = None,
+    started_at: str | None = None,
 ) -> None:
     if not run_log_path:
         return
 
+    ended_at = now_str()
+    rounded_duration = round(duration_seconds, 3) if duration_seconds is not None else None
+    summary = {
+        "timestamp": ended_at,
+        "started_at": started_at,
+        "ended_at": ended_at,
+        "duration_seconds": rounded_duration,
+        "success": final_result.get("success", False),
+        "mode": final_result.get("mode", "unknown"),
+        "phase": final_result.get("phase", "unknown"),
+        "summary": final_result.get("summary", ""),
+        "steps": steps,
+        "tool_call_count": len(tool_call_history or []),
+        "tool_call_history": tool_call_history or [],
+        "agent_trace_file": "agent_trace.json" if agent_trace is not None else "",
+        "final_result": final_result,
+    }
+
+    if agent_trace is not None:
+        save_agent_run_json(
+            run_log_path / "agent_trace.json",
+            {
+                "timestamp": ended_at,
+                "started_at": started_at,
+                "ended_at": ended_at,
+                "total_duration_seconds": rounded_duration,
+                "steps": len(agent_trace),
+                "tool_call_count": len(tool_call_history or []),
+                "tool_call_history": tool_call_history or [],
+                "final_result": final_result,
+                "trace": agent_trace,
+            },
+        )
+
     save_agent_run_json(
         run_log_path / "run_summary.json",
-        {
-            "timestamp": now_str(),
-            "success": final_result.get("success", False),
-            "mode": final_result.get("mode", "unknown"),
-            "phase": final_result.get("phase", "unknown"),
-            "summary": final_result.get("summary", ""),
-            "steps": steps,
-            "tool_call_count": len(tool_call_history or []),
-            "tool_call_history": tool_call_history or [],
-            "final_result": final_result,
-        },
+        summary,
     )
 
 
@@ -297,8 +366,11 @@ def run_agent_loop(
     run_log_dir: str | Path | None = None,
 ) -> Dict[str, Any]:
     run_log_path = Path(run_log_dir).resolve() if run_log_dir else None
+    run_started_at = now_str()
+    run_start = perf_counter()
     step_count = 0
     tool_call_history: List[Dict[str, Any]] = []
+    agent_trace: List[Dict[str, Any]] = []
 
     messages: List[Dict[str, str]] = [
         {"role": "system", "content": system_prompt},
@@ -308,8 +380,27 @@ def run_agent_loop(
     consecutive_thinking = 0
     error_retry_count = 0
 
+    def finalize(result: Dict[str, Any]) -> Dict[str, Any]:
+        save_run_summary(
+            run_log_path,
+            result,
+            step_count,
+            tool_call_history,
+            duration_seconds=perf_counter() - run_start,
+            agent_trace=agent_trace,
+            started_at=run_started_at,
+        )
+        return result
+
     for step_index in range(1, max_steps + 1):
         step_count = step_index
+        step_start = perf_counter()
+        step_trace: Dict[str, Any] = {
+            "step": step_index,
+            "started_at": now_str(),
+            "input_messages": serialize_messages(messages),
+        }
+        agent_trace.append(step_trace)
 
         if run_log_path:
             save_agent_run_json(
@@ -321,8 +412,22 @@ def run_agent_loop(
                 },
             )
 
-        response_text = call_llm(messages)
+        response_text = call_llm(messages, "main")
+        
         parsed = parse_model_output(response_text)
+        format_valid, format_error = assess_model_output_format(parsed)
+        # print(parsed)
+        step_trace.update(
+            {
+                "ended_at": now_str(),
+                "duration_seconds": round(perf_counter() - step_start, 3),
+                "raw_output": response_text,
+                "parsed_output": parsed,
+                "output_type": parsed.get("type"),
+                "model_output_format_valid": format_valid,
+                "model_output_format_error": format_error,
+            }
+        )
 
         if run_log_path:
             save_agent_run_json(
@@ -348,8 +453,7 @@ def run_agent_loop(
                         "raw_output": parsed.get("raw_output", response_text),
                     },
                 )
-                save_run_summary(run_log_path, result, step_count, tool_call_history)
-                return result
+                return finalize(result)
 
             messages.append({"role": "assistant", "content": response_text})
             messages.append({
@@ -402,8 +506,7 @@ def run_agent_loop(
                         next_todos=["检查 prompt 中 tool_call 格式要求"],
                         extra={"raw_output": response_text},
                     )
-                    save_run_summary(run_log_path, result, step_count, tool_call_history)
-                    return result
+                    return finalize(result)
 
                 messages.append({"role": "assistant", "content": response_text})
                 messages.append({
@@ -427,8 +530,7 @@ def run_agent_loop(
                         next_todos=["检查 prompt 中 args 必须为 JSON object"],
                         extra={"raw_output": response_text},
                     )
-                    save_run_summary(run_log_path, result, step_count, tool_call_history)
-                    return result
+                    return finalize(result)
 
                 messages.append({"role": "assistant", "content": response_text})
                 messages.append({
@@ -443,6 +545,15 @@ def run_agent_loop(
                 continue
 
             tool_result = execute_tool_call(tool, args, project_root)
+            step_trace["tool_call"] = {
+                "tool": tool,
+                "args": args,
+                "reason": parsed.get("reason", ""),
+                "success": tool_result.get("success"),
+                "result": tool_result,
+            }
+            step_trace["ended_at"] = now_str()
+            step_trace["duration_seconds"] = round(perf_counter() - step_start, 3)
 
             tool_call_record = {
                 "step": step_index,
@@ -482,8 +593,7 @@ def run_agent_loop(
                     for item in tool_call_history
                 ]
 
-            save_run_summary(run_log_path, final_result, step_count, tool_call_history)
-            return final_result
+            return finalize(final_result)
 
         error_retry_count += 1
 
@@ -494,8 +604,7 @@ def run_agent_loop(
                 next_todos=["检查循环输出协议"],
                 extra={"raw_output": response_text},
             )
-            save_run_summary(run_log_path, result, step_count, tool_call_history)
-            return result
+            return finalize(result)
 
         messages.append({"role": "assistant", "content": response_text})
         messages.append({
@@ -509,5 +618,4 @@ def run_agent_loop(
         })
 
     forced = build_forced_stop_result(max_steps)
-    save_run_summary(run_log_path, forced, step_count, tool_call_history)
-    return forced
+    return finalize(forced)

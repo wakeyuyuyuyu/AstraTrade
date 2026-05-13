@@ -27,11 +27,20 @@
 
 ---
 
+## 核心亮点
+
+| 重点 | 说明 |
+| --- | --- |
+| 三种唤醒模式 + Alarm | 主 Agent 支持 `scheduler` 定时巡检、`manual` 人工指令、`trigger` 事件触发；Alarm 可把一次性或周期性任务转成到点自动执行的人工任务 |
+| 三类交易工作池 | `持仓池` 跟踪当前仓位和盈亏，`策略池` 保存买卖计划与风控条件，`候选池` 沉淀观察标的和触发条件 |
+| 主 Agent / 子 Agent 协作 | 主 Agent 负责综合判断、文件更新和最终决策；持仓/候选子 Agent 负责盘中盯盘，满足条件时唤醒主 Agent |
+| 模型分层配置 | 主 Agent 使用 `LLM_*` 配置；子 Agent 使用 `SUB_LLM_*` 配置 |
+
 ## 项目简介
 
-`AstraTrade` 是一个本地优先的 A 股研究与模拟交易 Agent 系统，实现全自动化的市场盯盘、决策制定、交易执行。以 `workspace/` 作为本地工作空间，围绕账户状态、市场状态、持仓池、策略池、候选池、工具调用、结构化日志和运行轨迹组织日常工作。
+`AstraTrade` 是一个本地优先的 A 股研究与模拟交易 Agent 系统，用于自动化市场盯盘、策略制定、模拟交易记录和复盘分析。系统以 `workspace/` 作为本地工作空间，围绕账户状态、市场状态、持仓池、策略池、候选池组织日常工作。
 
-默认入口为本地 dashboard：可在页面里查看账户与市场状态、配置投资风格和 API、管理 scheduler、提交人工指令、触发主 Agent，并复盘每一次模型输出和工具调用。
+支持自定义配置投资风格，子 Agent 在开盘期间自动执行盯盘；主 Agent 支持 `manual`、`scheduler`、`trigger` 三种唤醒模式，并可通过 Alarm 将自然语言提醒转化为到点执行的任务。
 
 > 免责声明：本项目用于研究、模拟交易、策略验证和自动化复盘，不构成投资建议。任何真实交易动作都应由用户自行核验行情、账户、持仓、风控和工具返回结果后再决定。
 
@@ -39,11 +48,15 @@
 
 | 能力 | 说明 |
 | --- | --- |
+| 多模式唤醒 | `manual`、`scheduler`、`trigger` 三种主 Agent 调用方式，并支持 Alarm 定时触发人工任务 |
+| 池子体系 | 持仓池、策略池、候选池分别承载当前仓位、执行计划和观察标的 |
+| Agent 协作 | 主 Agent 负责最终判断，持仓/候选子 Agent 负责盘中监控；主/子 Agent 可分别配置模型 |
 | 本地控制台 | 账户状态、市场状态、池子看板、调度配置、人工指令、运行轨迹集中在一个 dashboard |
 | 自动巡检 | 支持盘前唤醒、盘中巡检、盘后复盘，以及持仓/候选池子 Agent 盯盘 |
 | 长期记忆 | 所有状态、日志、报告、策略与 skills 保存在 `workspace/`，便于回溯和迁移 |
 | 风格约束 | 通过 `config/investment_style.json` 生成 `workspace/STYLE.md`，约束交易周期、风险偏好和仓位风格 |
-| 结构化复盘 | 每轮 Agent 调用会落盘 prompt、工具调用、最终输出和逐步运行轨迹 |
+| 受控写入 | `read/write/edit/add/exec` 统一经过工具层；结构化文件写入后会按 schema 校验，失败会返回明确错误 |
+| 结构化复盘 | 每轮 Agent 调用会落盘 prompt、逐步输入输出、工具结果、run summary 和完整运行轨迹 |
 | 金融 Skills | 集成 `mx-data`、`mx-search`、`mx-moni` 等本地 skill，用于行情、资讯和模拟交易 |
 
 ## 快速开始
@@ -80,9 +93,15 @@ LLM_API_KEY=your_llm_api_key
 LLM_URL=https://your-openai-compatible-endpoint/v1
 LLM_MODEL=your_model_name
 
+SUB_LLM_API_KEY=your_sub_agent_llm_api_key
+SUB_LLM_URL=https://your-openai-compatible-endpoint/v1
+SUB_LLM_MODEL=your_sub_agent_model_name
+
 MX_APIKEY=your_mx_api_key
 MX_API_URL=https://mkapi2.dfcfs.com/finskillshub
 ```
+
+`SUB_LLM_*` 用于持仓/候选子 Agent；如果不配置，会逐项回退到主 Agent 的 `LLM_*` 配置。
 
 ### 4. 启动 dashboard
 
@@ -167,7 +186,7 @@ flowchart TB
   Prompt --> Loop["Agent Loop<br/>runtime/agent_loop.py"]
 
   Loop --> LLM["OpenAI 兼容 LLM<br/>services/llm_service.py"]
-  Loop --> Tools["受控工具层<br/>read · write · edit · add · exec"]
+  Loop --> Tools["受控工具层<br/>read · write · edit · add · exec · schema 校验"]
   Tools --> Workspace["workspace<br/>state · pools · logs · reports · skills"]
   Workspace --> Context
 
@@ -180,7 +199,7 @@ flowchart TB
   Candidate --> Skills
   Skills --> Workspace
 
-  Loop --> Trace["运行轨迹<br/>workspace/logs/agent_runs/{run_id}"]
+  Loop --> Trace["运行轨迹<br/>workspace/logs/agent_runs/{run_id}<br/>step · summary · trace"]
   Trace --> Dashboard
 ```
 
@@ -190,11 +209,12 @@ flowchart TB
 | --- | --- |
 | `dashboard/` | 本地控制台，用于查看状态、提交人工指令、配置风格/API/scheduler、控制 scheduler 和复盘轨迹 |
 | `runtime/launcher.py` | 主 Agent 单次运行入口，负责进入 scheduler、manual 或 trigger 模式 |
-| `runtime/agent_loop.py` | LLM 循环与工具调用执行器，记录每一步输入、输出和工具结果 |
+| `runtime/agent_loop.py` | LLM 循环与工具调用执行器，记录每一步输入、输出、工具结果和完整轨迹 |
 | `runtime/agent.py` | 常驻调度器，根据 `config/scheduler.json` 执行主 Agent 唤醒、Alarm 和盘中子 Agent 巡检 |
 | `subagent/` | 持仓池和候选池盯盘逻辑 |
 | `workspace/` | 本地长期记忆，保存状态、池子、日志、报告和 skills |
 | `system/` | 核心提示词、模式规则、工具协议和输出协议 |
+| `tools/` | 受控工具层，负责 workspace 文件读写、命令执行、skills 摘要读取和结构化文件校验 |
 
 ## 手动安装
 
@@ -215,7 +235,10 @@ bash dashboard/start.sh 8787
 | --- | --- | --- |
 | `LLM_API_KEY` | 是 | OpenAI 兼容接口密钥 |
 | `LLM_URL` | 是 | OpenAI 兼容接口地址，通常以 `/v1` 结尾 |
-| `LLM_MODEL` | 是 | 模型名称 |
+| `LLM_MODEL` | 是 | 主 Agent 模型名称 |
+| `SUB_LLM_API_KEY` | 否 | 子 Agent OpenAI 兼容接口密钥；不填则回退 `LLM_API_KEY` |
+| `SUB_LLM_URL` | 否 | 子 Agent OpenAI 兼容接口地址；不填则回退 `LLM_URL` |
+| `SUB_LLM_MODEL` | 否 | 子 Agent 模型名称；不填则回退 `LLM_MODEL` |
 | `MX_APIKEY` | 否 | 东方财富妙想 Skills API Key，用于金融数据、资讯和模拟组合 |
 | `MX_API_URL` | 否 | 妙想 API 地址 |
 | `TRADINGAGENTS_TOKEN` | 否 | TradingAgents 服务 Token |
@@ -331,7 +354,7 @@ AstraTrade/
 │   └── modes/                       # scheduler/manual/trigger 模式规则
 ├── tools/
 │   ├── exec.py                      # 受限命令执行
-│   ├── file_tools.py                # workspace 文件工具
+│   ├── file_tools.py                # workspace 文件工具与 schema 校验
 │   └── list_skills.py               # skills 摘要读取
 ├── workspace/
 │   ├── MARKET.md                    # A 股市场背景
@@ -348,9 +371,11 @@ AstraTrade/
 └── requirements.txt                  # Python 依赖
 ```
 
+本地运行产生的 `.env`、dashboard runtime、workspace 日志/报告/记忆、池子与状态数据，以及个人实验用的 `test/` 目录默认不提交到 GitHub。
+
 ## 数据文件
 
-核心结构化文件定义在 `workspace/skills/astra-trade-schema/`。
+核心结构化文件定义在 `workspace/skills/astra-trade-schema/`。Agent 在写入 `state/`、`pools/`、`logs/`、`reports/` 等结构化数据前应参考该 skill；文件工具会在写入后做格式校验，发现缺字段、JSON/JSONL 解析失败或目标类型不匹配时返回错误，提示模型读取对应 schema 后重试。
 
 | 文件 | 说明 |
 | --- | --- |
@@ -363,8 +388,11 @@ AstraTrade/
 | `workspace/logs/events.jsonl` | 外部事件、子 Agent 触发事件和系统事件 |
 | `workspace/logs/scheduler/` | scheduler 运行日志 |
 | `workspace/logs/agent_runs/{run_id}/` | 单次 Agent 调用的逐步轨迹 |
+| `workspace/logs/agent_runs/{run_id}/run_summary.json` | 单次调用摘要、耗时、工具调用历史和最终结果 |
+| `workspace/logs/agent_runs/{run_id}/agent_trace.json` | 单次调用的完整消息、模型输出、工具结果和耗时轨迹 |
 | `workspace/reports/{run_id}_prompt.md` | 本轮发送给模型的完整 prompt |
 | `workspace/reports/{run_id}_result.json` | 本轮最终结果 |
+| `workspace/skills/astra-trade-schema/` | workspace 结构化数据 schema 与写入参考 |
 
 ## 输出协议
 
@@ -374,7 +402,7 @@ AstraTrade/
 {
   "type": "final",
   "mode": "scheduler | manual | trigger",
-  "phase": "premarket | intraday | lunch_break | postmarket | unknown",
+  "phase": "premarket | intraday | lunch_break | postmarket | non_trading_day | unknown",
   "summary": "本轮总结",
   "actions": [],
   "tool_calls": [],
@@ -383,6 +411,8 @@ AstraTrade/
   "next_todos": []
 }
 ```
+
+循环中间输出只能是 `thinking`、`tool_call` 或 `final` 三种 JSON。若模型输出无法解析或缺少关键字段，Agent Loop 会把协议错误反馈给模型并要求重试。
 
 ## License
 

@@ -20,6 +20,14 @@ MX_API_URL = os.environ.get("MX_API_URL")
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_DIR = PROJECT_ROOT / "subagent" / "holding_follow" / "holding_state"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+ACCOUNT_STATE_PATH = PROJECT_ROOT / "workspace" / "state" / "account_state.json"
+
+DEFAULT_RISK = {
+    "max_position_ratio": 0.8,
+    "max_single_stock_ratio": 0.2,
+    "max_daily_trades": 5,
+    "stop_trading": False,
+}
 
 
 def check_apikey() -> None:
@@ -88,6 +96,86 @@ def ask_holding(time_str: str) -> Path:
         {"moneyUnit": 1},
         output_prefix="holding",
         time_str=time_str,
+    )
+
+
+def api_number(value: Any, decimals: Any = 0) -> float:
+    try:
+        number = float(value or 0)
+        dec = int(decimals or 0)
+    except Exception:
+        return 0.0
+    return number / (10**dec) if dec > 0 else number
+
+
+def api_position(holding: Dict[str, Any]) -> Dict[str, Any]:
+    raw_symbol = str(holding.get("secCode") or "").strip()
+    symbol = raw_symbol.zfill(6)
+    count = int(holding.get("count", 0) or 0)
+    cost_price = api_number(holding.get("costPrice"), holding.get("costPriceDec"))
+    current_price = api_number(holding.get("price"), holding.get("priceDec"))
+    market_value = api_number(holding.get("value"))
+    profit_loss = (current_price - cost_price) * count
+    profit_loss_ratio = (current_price / cost_price - 1) * 100 if cost_price else 0
+
+    return {
+        "symbol": symbol,
+        "name": holding.get("secName", ""),
+        "quantity": count,
+        "avg_cost": cost_price,
+        "current_price": current_price,
+        "market_value": market_value,
+        "profit_loss": profit_loss,
+        "profit_loss_ratio": profit_loss_ratio,
+    }
+
+
+def read_account_state() -> Dict[str, Any]:
+    if not ACCOUNT_STATE_PATH.exists() or ACCOUNT_STATE_PATH.stat().st_size == 0:
+        return {}
+    try:
+        data = json.loads(ACCOUNT_STATE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def sync_account_state(data: Dict[str, Any], time_str: str) -> None:
+    positions = [
+        api_position(holding)
+        for holding in data.get("posList") or []
+        if str(holding.get("secCode") or "").strip()
+    ]
+
+    market_value = sum(float(position.get("market_value") or 0) for position in positions)
+    total_asset = api_number(data.get("totalAssets"))
+    available_cash = api_number(data.get("availBalance"))
+
+    if total_asset <= 0:
+        total_asset = available_cash + market_value
+    if available_cash <= 0 and total_asset >= market_value:
+        available_cash = total_asset - market_value
+
+    previous = read_account_state()
+    account = {
+        **previous,
+        "mode": previous.get("mode") or "active",
+        "cash": available_cash,
+        "total_asset": total_asset,
+        "market_value": market_value,
+        "available_cash": available_cash,
+        "position_count": sum(
+            1 for position in positions if position.get("quantity", 0) > 0 or position.get("market_value", 0) > 0
+        ),
+        "positions": positions,
+        "risk": previous.get("risk") if isinstance(previous.get("risk"), dict) else DEFAULT_RISK,
+        "updated_at": time_str,
+    }
+
+    ACCOUNT_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    ACCOUNT_STATE_PATH.write_text(
+        json.dumps(account, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
     )
 
 
@@ -166,14 +254,21 @@ def update_holding(time_str: str) -> pd.DataFrame:
     old_holdings = read_holdings_jsonl(holdings_path)
     old_holdings = normalize_old_holdings(old_holdings)
 
-    for holding in new_holdings:
-        symbol = str(holding.get("secCode", "")).zfill(6)
-        if not symbol:
-            continue
+    if not (raw_data.get("success") or str(raw_data.get("code")) == "200"):
+        return old_holdings
 
-        cost_price = holding.get("costPrice", 0) / (10 ** holding.get("costPriceDec", 0))
-        current_price = holding.get("price", 0) / (10 ** holding.get("priceDec", 0))
-        market_value = holding.get("value", 0)
+    current_symbols = set()
+
+    for holding in new_holdings:
+        raw_symbol = str(holding.get("secCode") or "").strip()
+        if not raw_symbol:
+            continue
+        symbol = raw_symbol.zfill(6)
+
+        current_symbols.add(symbol)
+        cost_price = api_number(holding.get("costPrice"), holding.get("costPriceDec"))
+        current_price = api_number(holding.get("price"), holding.get("priceDec"))
+        market_value = api_number(holding.get("value"))
         count = int(holding.get("count", 0))
         avail_count = int(holding.get("availCount", 0))
 
@@ -212,6 +307,9 @@ def update_holding(time_str: str) -> pd.DataFrame:
             )
             old_holdings = pd.concat([old_holdings, new_line], ignore_index=True)
 
+    if "symbol" in old_holdings.columns:
+        old_holdings = old_holdings[old_holdings["symbol"].isin(current_symbols)]
+
     old_holdings = normalize_old_holdings(old_holdings)
 
     holdings_path.parent.mkdir(parents=True, exist_ok=True)
@@ -221,6 +319,7 @@ def update_holding(time_str: str) -> pd.DataFrame:
         lines=True,
         force_ascii=False,
     )
+    sync_account_state(data, time_str)
 
     return old_holdings
 

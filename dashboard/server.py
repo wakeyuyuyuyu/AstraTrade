@@ -1017,13 +1017,72 @@ def summarize_number(value: Any) -> float:
         return 0.0
 
 
+INACTIVE_HOLDING_STATUSES = {"sold", "closed", "cleared", "removed", "已卖出", "已清仓", "清仓"}
+
+
+def holding_quantity(item: Dict[str, Any]) -> float:
+    for key in ("count", "quantity", "shares"):
+        value = item.get(key)
+        if value is not None:
+            return summarize_number(value)
+    return 0.0
+
+
+def holding_market_value(item: Dict[str, Any]) -> float:
+    market_value = summarize_number(item.get("market_value"))
+    if market_value:
+        return market_value
+
+    price = summarize_number(item.get("current_price") or item.get("price"))
+    return holding_quantity(item) * price
+
+
+def is_active_holding(item: Dict[str, Any]) -> bool:
+    status = str(item.get("status") or "holding").strip().lower()
+    if status in INACTIVE_HOLDING_STATUSES:
+        return False
+    return holding_quantity(item) > 0 or holding_market_value(item) > 0
+
+
+def active_holdings(holdings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [item for item in holdings if is_active_holding(item)]
+
+
+def reconcile_account_from_holdings(account: Dict[str, Any], holdings: List[Dict[str, Any]]) -> Dict[str, Any]:
+    reconciled = dict(account) if isinstance(account, dict) else {}
+    current_holdings = active_holdings(holdings)
+    holdings_market_value = sum(holding_market_value(item) for item in current_holdings)
+
+    account_total_asset = summarize_number(reconciled.get("total_asset"))
+    account_cash = summarize_number(reconciled.get("available_cash", reconciled.get("cash")))
+
+    total_asset = account_total_asset
+    if total_asset <= 0:
+        total_asset = account_cash + holdings_market_value
+    if total_asset < holdings_market_value:
+        total_asset = holdings_market_value + max(account_cash, 0)
+
+    if total_asset > 0 and holdings_market_value <= total_asset:
+        available_cash = max(total_asset - holdings_market_value, 0)
+    else:
+        available_cash = max(account_cash, 0)
+
+    reconciled["market_value"] = holdings_market_value
+    reconciled["position_count"] = len(current_holdings)
+    reconciled["total_asset"] = total_asset
+    reconciled["available_cash"] = available_cash
+    reconciled["cash"] = available_cash
+    return reconciled
+
+
 def pool_metrics(holdings: List[Dict[str, Any]], strategies: List[Dict[str, Any]], candidates: List[Dict[str, Any]]) -> Dict[str, Any]:
     active_strategy_status = {"active", "pending", "watching", "trigger_ready", "待执行", "执行中"}
     candidate_status = {"watching", "ready", "trigger_ready", "待观察", "待触发"}
+    current_holdings = active_holdings(holdings)
 
     return {
-        "holdings_count": len(holdings),
-        "holdings_market_value": sum(summarize_number(item.get("market_value")) for item in holdings),
+        "holdings_count": len(current_holdings),
+        "holdings_market_value": sum(holding_market_value(item) for item in current_holdings),
         "strategies_count": len(strategies),
         "active_strategies_count": sum(1 for item in strategies if item.get("status") in active_strategy_status),
         "candidates_count": len(candidates),
@@ -1482,10 +1541,11 @@ def build_snapshot() -> Dict[str, Any]:
     holdings = read_jsonl(WORKSPACE_DIR / "pools" / "holdings.jsonl")
     strategies = read_jsonl(WORKSPACE_DIR / "pools" / "strategies.jsonl")
     candidates = read_jsonl(WORKSPACE_DIR / "pools" / "candidates.jsonl")
+    reconciled_account = reconcile_account_from_holdings(account, holdings)
 
     return {
         "updated_at": now_str(),
-        "account": account,
+        "account": reconciled_account,
         "market": market,
         "holdings": holdings,
         "stock_pool": strategies,

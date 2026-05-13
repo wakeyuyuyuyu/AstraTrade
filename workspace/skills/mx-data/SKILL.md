@@ -46,32 +46,32 @@ env:
 # ==================== 常用调用示例 ====================
 
 # 1. 个股实时行情查询
-python ./mx_data.py "东方财富最新价"
-python ./mx_data.py "贵州茅台今日收盘价 涨跌幅"
-python ./mx_data.py "宁德时代主力资金流向"
+python skills/mx-data/mx_data.py "东方财富最新价"
+python skills/mx-data/mx_data.py "贵州茅台今日收盘价 涨跌幅"
+python skills/mx-data/mx_data.py "宁德时代主力资金流向"
 
 # 2. 历史行情数据查询
-python ./mx_data.py "贵州茅台近五年年报收盘价"
-python ./mx_data.py "比亚迪近一年每个交易日的开盘价收盘价成交量"
+python skills/mx-data/mx_data.py "贵州茅台近五年年报收盘价"
+python skills/mx-data/mx_data.py "比亚迪近一年每个交易日的开盘价收盘价成交量"
 
 # 3. 财务数据查询
-python ./mx_data.py "贵州茅台近三年净利润 营业收入"
-python ./mx_data.py "东方财富每股收益 净资产收益率 近五年"
-python ./mx_data.py "万科A资产负债率 毛利率 近三年"
+python skills/mx-data/mx_data.py "贵州茅台近三年净利润 营业收入"
+python skills/mx-data/mx_data.py "东方财富每股收益 净资产收益率 近五年"
+python skills/mx-data/mx_data.py "万科A资产负债率 毛利率 近三年"
 
 # 4. 上市公司基本信息
-python ./mx_data.py "比亚迪公司简介 主营业务 成立时间"
-python ./mx_data.py "贵州茅台董事长是谁 总股本多少"
+python skills/mx-data/mx_data.py "比亚迪公司简介 主营业务 成立时间"
+python skills/mx-data/mx_data.py "贵州茅台董事长是谁 总股本多少"
 
 # 5. 股东信息
-python ./mx_data.py "贵州茅台十大股东"
-python ./mx_data.py "比亚迪机构持股比例"
+python skills/mx-data/mx_data.py "贵州茅台十大股东"
+python skills/mx-data/mx_data.py "比亚迪机构持股比例"
 # 6. 板块/指数行情
-python ./mx_data.py "沪深300指数最新点位 涨跌幅"
-python ./mx_data.py "新能源板块成分股平均涨跌幅"
+python skills/mx-data/mx_data.py "沪深300指数最新点位 涨跌幅"
+python skills/mx-data/mx_data.py "新能源板块成分股平均涨跌幅"
 
 # 7. 指定输出目录（可选）
-python ./mx_data.py "贵州茅台近五年年报" /path/to/output
+python skills/mx-data/mx_data.py "贵州茅台近五年年报" /path/to/output
 ```
 
    > ⚠️ **安全注意事项**

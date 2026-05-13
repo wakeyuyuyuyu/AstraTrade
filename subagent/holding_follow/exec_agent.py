@@ -235,7 +235,7 @@ def run_holding_follow(
             {"role": "user", "content": "请严格按协议输出 JSON。"},
         ]
 
-        response = call_llm(messages)
+        response = call_llm(messages, "sub")
         parsed = parse_model_output(response)
 
         record: Dict[str, Any] = {

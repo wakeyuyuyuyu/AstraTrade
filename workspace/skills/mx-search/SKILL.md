@@ -43,30 +43,32 @@ credentials:
 ```bash
 # ==================== 常用调用示例 ====================
 
+在 AstraTrade Agent 中，`exec.cwd` 默认以 `workspace/` 为路径基准，因此调用本 Skill 时，应直接使用完整脚本路径：
+
 # 1. 个股相关资讯
-python ./mx_search.py "东方财富最新公告"
-python ./mx_search.py "贵州茅台最新研报"
-python ./mx_search.py "比亚迪机构观点汇总"
+python skills/mx-search/mx_search.py "东方财富最新公告"
+python skills/mx-search/mx_search.py "贵州茅台最新研报"
+python skills/mx-search/mx_search.py "比亚迪机构观点汇总"
 
 # 2. 行业/板块新闻
-python ./mx_search.py "人工智能板块近期新闻"
-python ./mx_search.py "新能源汽车产业政策最新解读"
+python skills/mx-search/mx_search.py "人工智能板块近期新闻"
+python skills/mx-search/mx_search.py "新能源汽车产业政策最新解读"
 
 # 3. 宏观经济与市场分析
-python ./mx_search.py "美联储加息对A股影响分析"
-python ./mx_search.py "今日大盘异动原因分析"
-python ./mx_search.py "北向资金最新流向解读"
+python skills/mx-search/mx_search.py "美联储加息对A股影响分析"
+python skills/mx-search/mx_search.py "今日大盘异动原因分析"
+python skills/mx-search/mx_search.py "北向资金最新流向解读"
 
 # 4. 个股事件
-python ./mx_search.py "贵州茅台分红派息实施公告"
-python ./mx_search.py "宁德时代定增预案解读"
+python skills/mx-search/mx_search.py "贵州茅台分红派息实施公告"
+python skills/mx-search/mx_search.py "宁德时代定增预案解读"
 
 # 5. 交易规则
-python ./mx_search.py "科创板交易涨跌幅限制"
-python ./mx_search.py "新股申购规则"
+python skills/mx-search/mx_search.py "科创板交易涨跌幅限制"
+python skills/mx-search/mx_search.py "新股申购规则"
 
 # 6. 指定输出目录（可选）
-python ./mx_search.py "格力电器最新研报" /path/to/output
+python skills/mx-search/mx_search.py "格力电器最新研报" logs/mx_data/output
 ```
 
    > ⚠️ **安全注意事项**

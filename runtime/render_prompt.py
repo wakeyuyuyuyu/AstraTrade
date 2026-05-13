@@ -203,7 +203,7 @@ def build_agent_entry_block(
         "",
         "- 只能输出 `thinking`、`tool_call` 或 `final` 三种 JSON。",
         "- 不要输出 JSON 以外的普通文本及任何解释性文字。",
-        "- 不要输出多个 JSON。",
+        "- 只能输出单个JSON",
         "- 不要解释系统设计。",
         "- 不要输出与本轮任务无关的内容。",
         "- 禁止输出多个 Markdown 代码块。",

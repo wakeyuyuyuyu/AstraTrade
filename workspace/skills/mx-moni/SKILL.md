@@ -89,26 +89,26 @@ export MX_API_URL=${MX_API_URL:-"https://mkapi2.dfcfs.com/finskillshub"}
 # ==================== 常用调用示例 ====================
 
 # 1. 账户查询类
-python ./mx_moni.py "我的持仓"
-python ./mx_moni.py "查询持仓"
-python ./mx_moni.py "我的资金"
-python ./mx_moni.py "账户余额"
-python ./mx_moni.py "我的委托"
-python ./mx_moni.py "查询订单"
+python skills/mx-moni/mx_moni.py "我的持仓"
+python skills/mx-moni/mx_moni.py "查询持仓"
+python skills/mx-moni/mx_moni.py "我的资金"
+python skills/mx-moni/mx_moni.py "账户余额"
+python skills/mx-moni/mx_moni.py "我的委托"
+python skills/mx-moni/mx_moni.py "查询订单"
 
 # 2. 买入操作
-python ./mx_moni.py "买入 600519 价格 1700 数量 100 股"       # 限价买入
-python ./mx_moni.py "市价买入 600519 100 股"                   # 市价买入
-python ./mx_moni.py "买 300059 19.4 100股"                     # 简写也支持
+python skills/mx-moni/mx_moni.py "买入 600519 价格 1700 数量 100 股"       # 限价买入
+python skills/mx-moni/mx_moni.py "市价买入 600519 100 股"                   # 市价买入
+python skills/mx-moni/mx_moni.py "买 300059 19.4 100股"                     # 简写也支持
 
 # 3. 卖出操作
-python ./mx_moni.py "卖出 600519 价格 1750 数量 100 股"      # 限价卖出
-python ./mx_moni.py "市价卖出 600519 100 股"                  # 市价卖出
-python ./mx_moni.py "卖 300059 19.5 100股"                     # 简写也支持
+python skills/mx-moni/mx_moni.py "卖出 600519 价格 1750 数量 100 股"      # 限价卖出
+python skills/mx-moni/mx_moni.py "市价卖出 600519 100 股"                  # 市价卖出
+python skills/mx-moni/mx_moni.py "卖 300059 19.5 100股"                     # 简写也支持
 
 # 4. 撤单操作
-python ./mx_moni.py "撤单 260854300000078983"                 # 按委托编号撤单
-python ./mx_moni.py "一键撤单"                                 # 撤销当日所有未成交委托
+python skills/mx-moni/mx_moni.py "撤单 260854300000078983"                 # 按委托编号撤单
+python skills/mx-moni/mx_moni.py "一键撤单"                                 # 撤销当日所有未成交委托
 ```
 
    > ⚠️ **安全注意事项**

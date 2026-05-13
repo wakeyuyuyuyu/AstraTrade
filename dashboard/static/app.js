@@ -126,12 +126,67 @@ function shortText(value, fallback = "--") {
   return String(value);
 }
 
+const accountModeLabels = {
+  active: "运行中",
+  initialization: "初始化",
+  paper: "模拟盘",
+  live: "实盘",
+  paused: "已暂停",
+  stopped: "已停止",
+};
+
+const marketViewLabels = {
+  bullish: "偏多",
+  bearish: "偏空",
+  neutral: "中性",
+  warm: "偏暖",
+  weak: "偏弱",
+  unknown: "未知",
+};
+
+const marketRiskLabels = {
+  low: "低风险",
+  medium: "中风险",
+  high: "高风险",
+  unknown: "未知风险",
+};
+
 function compactDateTime(value) {
   const raw = String(value || "").trim();
   if (!raw) return "--";
   const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
   if (match) return `${match[2]}-${match[3]} ${match[4]}:${match[5]}`;
   return raw;
+}
+
+function parseDateTime(value) {
+  const raw = String(value || "").trim();
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (!match) return null;
+  const date = new Date(
+    Number(match[1]),
+    Number(match[2]) - 1,
+    Number(match[3]),
+    Number(match[4]),
+    Number(match[5]),
+    Number(match[6] || 0)
+  );
+  return Number.isFinite(date.getTime()) ? date : null;
+}
+
+function latestDateTime(values) {
+  return values.map(parseDateTime).filter(Boolean).sort((a, b) => b.getTime() - a.getTime())[0] || null;
+}
+
+function formatParsedDateTime(date) {
+  if (!date) return "--";
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function isStale(date, maxAgeMinutes) {
+  if (!date) return true;
+  return Date.now() - date.getTime() > maxAgeMinutes * 60 * 1000;
 }
 
 function setMessage(id, message, type = "") {
@@ -222,6 +277,86 @@ function dailyTradeCount(data, day) {
   }).length;
 }
 
+const inactiveHoldingStatuses = new Set(["sold", "closed", "cleared", "removed", "已卖出", "已清仓", "清仓"]);
+
+function holdingQuantity(item) {
+  return Number(item?.count ?? item?.quantity ?? item?.shares) || 0;
+}
+
+function holdingMarketValue(item) {
+  const marketValue = Number(item?.market_value);
+  if (Number.isFinite(marketValue) && marketValue !== 0) return marketValue;
+
+  const price = Number(item?.current_price ?? item?.price) || 0;
+  return holdingQuantity(item) * price;
+}
+
+function activeHoldings(holdings) {
+  return (holdings || []).filter((item) => {
+    const status = String(item?.status || "holding").trim().toLowerCase();
+    if (inactiveHoldingStatuses.has(status)) return false;
+    return holdingQuantity(item) > 0 || holdingMarketValue(item) > 0;
+  });
+}
+
+function setTag(id, label, className = "", title = "") {
+  const node = $(id);
+  if (!node) return;
+  node.textContent = label || "--";
+  node.className = `tag ${className}`.trim();
+  node.title = title || "";
+}
+
+function accountStatus(account, holdings) {
+  const mode = String(account.mode || "").toLowerCase();
+  const updatedAt = latestDateTime([
+    account.updated_at,
+    ...holdings.map((item) => item.updated_at),
+  ]);
+
+  if (account.risk?.stop_trading) {
+    return {
+      label: "风控停止",
+      className: "failed",
+      title: "账户风控 stop_trading 已触发",
+    };
+  }
+
+  if (isStale(updatedAt, 90)) {
+    return {
+      label: "待同步",
+      className: "running",
+      title: "账户或持仓超过 90 分钟未同步",
+    };
+  }
+
+  return {
+    label: accountModeLabels[mode] || account.mode || "账户在线",
+    className: mode === "initialization" ? "running" : "success",
+    title: updatedAt ? `最近同步 ${formatParsedDateTime(updatedAt)}` : "",
+  };
+}
+
+function marketStatus(market) {
+  const view = String(market.market_view || "unknown").toLowerCase();
+  const risk = String(market.risk_level || "unknown").toLowerCase();
+  const updatedAt = parseDateTime(market.updated_at);
+
+  if (isStale(updatedAt, 240)) {
+    return {
+      label: "市场待刷新",
+      className: "running",
+      title: "市场状态超过 4 小时未更新",
+    };
+  }
+
+  return {
+    label: `${marketViewLabels[view] || market.market_view || "未知"} / ${marketRiskLabels[risk] || market.risk_level || "未知风险"}`,
+    className: risk === "high" ? "failed" : risk === "low" ? "success" : "running",
+    title: updatedAt ? `市场状态 ${formatParsedDateTime(updatedAt)} 更新` : "",
+  };
+}
+
 function riskClass(usage, hardStop = false) {
   if (hardStop) return "danger";
   if (!Number.isFinite(usage)) return "idle";
@@ -264,26 +399,31 @@ function renderRiskPill(id, config) {
 function renderAccount(data) {
   const account = data.account || {};
   const risk = account.risk || {};
-  const holdings = data.holdings || [];
-  const totalAsset = Number(account.total_asset) || 0;
-  const marketValue = Number(account.market_value) || 0;
-  const availableCash = Number(account.available_cash ?? account.cash) || 0;
+  const holdings = activeHoldings(data.holdings || []);
+  const holdingsMarketValue = holdings.reduce((sum, item) => sum + holdingMarketValue(item), 0);
+  const accountTotalAsset = Number(account.total_asset) || 0;
+  const accountCash = Number(account.available_cash ?? account.cash) || 0;
+  let totalAsset = accountTotalAsset > 0 ? accountTotalAsset : accountCash + holdingsMarketValue;
+  if (totalAsset < holdingsMarketValue) totalAsset = holdingsMarketValue + Math.max(accountCash, 0);
+  const marketValue = holdings.length ? holdingsMarketValue : Number(account.market_value) || 0;
+  const availableCash = totalAsset > 0 ? Math.max(totalAsset - marketValue, 0) : accountCash;
   const allocationBase = Math.max(totalAsset, marketValue + availableCash, 1);
   const marketPct = clamp((marketValue / allocationBase) * 100, 0, 100);
   const positionRatio = totalAsset > 0 ? marketValue / totalAsset : 0;
-  const maxHoldingValue = holdings.reduce((max, item) => Math.max(max, Number(item.market_value) || 0), 0);
+  const maxHoldingValue = holdings.reduce((max, item) => Math.max(max, holdingMarketValue(item)), 0);
   const singleStockRatio = totalAsset > 0 ? maxHoldingValue / totalAsset : 0;
   const maxPositionRatio = Number(risk.max_position_ratio);
   const maxSingleStockRatio = Number(risk.max_single_stock_ratio);
   const maxDailyTrades = Number(risk.max_daily_trades);
   const today = String(data.updated_at || "").slice(0, 10);
   const tradesToday = dailyTradeCount(data, today);
+  const status = accountStatus(account, holdings);
 
-  text("accountMode", account.mode || "--");
+  setTag("accountMode", status.label, status.className, status.title);
   text("totalAsset", formatMoney(totalAsset));
   text("availableCash", formatMoney(availableCash));
   text("marketValue", formatMoney(marketValue));
-  text("positionCount", account.position_count ?? data.metrics?.holdings_count ?? 0);
+  text("positionCount", data.metrics?.holdings_count ?? holdings.length ?? account.position_count ?? 0);
   text("assetPositionRatio", formatPercent(positionRatio));
   text("assetMarketLegend", `${formatMoney(marketValue)} · ${marketPct.toFixed(1)}%`);
   text("assetCashLegend", `${formatMoney(availableCash)} · ${(100 - marketPct).toFixed(1)}%`);
@@ -327,12 +467,8 @@ function renderAccount(data) {
 function renderMarket(data) {
   if (!$("marketRisk") && !$("marketChips")) return;
   const market = data.market || {};
-  const riskText = `${market.market_view || "unknown"} / ${market.risk_level || "unknown"}`;
-  const riskNode = $("marketRisk");
-  if (riskNode) {
-    riskNode.textContent = riskText;
-    riskNode.className = `tag ${tagClass(market.risk_level)}`.trim();
-  }
+  const status = marketStatus(market);
+  setTag("marketRisk", status.label, status.className, status.title);
   text("marketDate", market.date || "--");
   text("marketUpdatedAt", compactDateTime(market.updated_at));
   text("marketSummary", market.summary || "暂无市场摘要");
@@ -563,17 +699,18 @@ function holdingColor(index) {
 }
 
 function renderHoldingsOverview(holdings) {
-  const marketTotal = holdings.reduce((sum, item) => sum + (Number(item.market_value) || 0), 0);
-  const pnlTotal = holdings.reduce((sum, item) => sum + (Number(item.unrealized_pnl) || 0), 0);
-  const largest = holdings.reduce((best, item) => {
-    const value = Number(item.market_value) || 0;
-    return value > (Number(best?.market_value) || 0) ? item : best;
+  const currentHoldings = activeHoldings(holdings || []);
+  const marketTotal = currentHoldings.reduce((sum, item) => sum + holdingMarketValue(item), 0);
+  const pnlTotal = currentHoldings.reduce((sum, item) => sum + (Number(item.unrealized_pnl) || 0), 0);
+  const largest = currentHoldings.reduce((best, item) => {
+    const value = holdingMarketValue(item);
+    return value > (best ? holdingMarketValue(best) : 0) ? item : best;
   }, null);
 
   text("holdingsMarketTotal", formatMoney(marketTotal));
   text("holdingsPnlTotal", formatMoney(pnlTotal));
-  text("largestHolding", largest ? `${largest.name || largest.symbol} · ${formatMoney(largest.market_value)}` : "--");
-  text("holdingsPieText", holdings.length ? `${holdings.length} 只` : "空");
+  text("largestHolding", largest ? `${largest.name || largest.symbol} · ${formatMoney(holdingMarketValue(largest))}` : "--");
+  text("holdingsPieText", currentHoldings.length ? `${currentHoldings.length} 只` : "空");
 
   const pnlNode = $("holdingsPnlTotal");
   if (pnlNode) {
@@ -587,7 +724,7 @@ function renderHoldingsOverview(holdings) {
 
   clearNode(legend);
 
-  if (!holdings.length || marketTotal <= 0) {
+  if (!currentHoldings.length || marketTotal <= 0) {
     pie.style.background = "conic-gradient(var(--surface-3) 0 100%)";
     const empty = document.createElement("span");
     empty.className = "muted";
@@ -597,8 +734,8 @@ function renderHoldingsOverview(holdings) {
   }
 
   let cursor = 0;
-  const segments = holdings.map((item, index) => {
-    const value = Number(item.market_value) || 0;
+  const segments = currentHoldings.map((item, index) => {
+    const value = holdingMarketValue(item);
     const percent = marketTotal > 0 ? (value / marketTotal) * 100 : 0;
     const start = cursor;
     const end = cursor + percent;
@@ -607,8 +744,8 @@ function renderHoldingsOverview(holdings) {
   });
   pie.style.background = `conic-gradient(${segments.join(", ")})`;
 
-  holdings.slice(0, 6).forEach((item, index) => {
-    const value = Number(item.market_value) || 0;
+  currentHoldings.slice(0, 6).forEach((item, index) => {
+    const value = holdingMarketValue(item);
     const row = document.createElement("div");
     const dot = document.createElement("span");
     dot.className = "legend-dot";

@@ -1,6 +1,7 @@
 # Log Schemas
 
 Files under `workspace/logs/` are JSONL. Append records; do not overwrite the whole file.
+Each JSONL record must be written as a compact single-line JSON object without spaces after `:` or `,`, equivalent to `json.dumps(record, ensure_ascii=False, separators=(",", ":"))`.
 
 ## agent_runs.jsonl
 
