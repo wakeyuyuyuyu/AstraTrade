@@ -4,6 +4,8 @@ set -euo pipefail
 # ===== 路径定义 =====
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE="${WORKSPACE:-$ROOT/workspace}"
+CONFIG_DIR="$ROOT/config"
+DASHBOARD_RUNTIME_DIR="$ROOT/dashboard/runtime"
 STATE_DIR="$WORKSPACE/state"
 POOLS_DIR="$WORKSPACE/pools"
 LOGS_DIR="$WORKSPACE/logs"
@@ -13,6 +15,10 @@ AGENT_RUNS_DIR="$LOGS_DIR/agent_runs"
 SCHEDULER_DIR="$LOGS_DIR/scheduler"
 MX_DATA_OUTPUT_DIR="$LOGS_DIR/mx_data/output"
 REPORTS_DIR="$WORKSPACE/reports"
+ALARM_CONFIG_PATH="$CONFIG_DIR/alarm.json"
+DASHBOARD_MANUAL_RUNS_PATH="$DASHBOARD_RUNTIME_DIR/manual_runs.jsonl"
+DASHBOARD_INITIALIZATION_RUNS_PATH="$DASHBOARD_RUNTIME_DIR/initialization_runs.jsonl"
+DASHBOARD_SCHEDULER_LOG_PATH="$DASHBOARD_RUNTIME_DIR/scheduler.log"
 
 # ===== 获取时间 =====
 TODAY=$(date +"%Y-%m-%d")
@@ -20,6 +26,8 @@ NOW=$(date +"%Y-%m-%d %H:%M:%S")
 
 # ===== 准备目录 =====
 mkdir -p \
+  "$CONFIG_DIR" \
+  "$DASHBOARD_RUNTIME_DIR" \
   "$STATE_DIR" \
   "$POOLS_DIR" \
   "$LOGS_DIR" \
@@ -50,6 +58,11 @@ rm -rf "$MX_DATA_OUTPUT_DIR"/*
 
 echo "Clearing contents of reports..."
 rm -rf "$REPORTS_DIR"/*
+
+echo "Clearing dashboard history..."
+: > "$DASHBOARD_MANUAL_RUNS_PATH"
+: > "$DASHBOARD_INITIALIZATION_RUNS_PATH"
+: > "$DASHBOARD_SCHEDULER_LOG_PATH"
 
 touch \
   "$POOLS_DIR/holdings.jsonl" \
@@ -94,6 +107,15 @@ cat > "$STATE_DIR/market_state.json" <<EOF
   "key_events": [],
   "updated_at": "$NOW",
   "evidence": []
+}
+EOF
+
+# ===== 初始化 alarm.json =====
+echo "Initializing alarm.json..."
+cat > "$ALARM_CONFIG_PATH" <<EOF
+{
+  "enabled": true,
+  "alarms": []
 }
 EOF
 

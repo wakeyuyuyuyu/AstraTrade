@@ -132,6 +132,18 @@ API_ENV_VARS = [
         "description": "妙想模拟交易 API 基础地址。",
         "secret": False,
     },
+    {
+        "key": "TRADINGAGENTS_TOKEN",
+        "label": "TradingAgents Token",
+        "description": "TradingAgents 服务 Token，用于连接外部分析服务。",
+        "secret": True,
+    },
+    {
+        "key": "TRADINGAGENTS_API_URL",
+        "label": "TradingAgents API URL",
+        "description": "TradingAgents 服务地址。",
+        "secret": False,
+    },
 ]
 
 
@@ -415,14 +427,16 @@ def normalize_scheduler_config(config: Dict[str, Any]) -> Dict[str, Any]:
     for index, item in enumerate(config.get("fixed_jobs") or [], start=1):
         if not isinstance(item, dict):
             raise ValueError(f"固定任务 #{index} 必须是对象")
-        fixed_jobs.append(
-            {
-                "name": clean_command_value(item.get("name"), f"固定任务 #{index} 名称"),
-                "enabled": bool(item.get("enabled", True)),
-                "time": validate_time_value(item.get("time"), f"固定任务 #{index} 时间"),
-                "trigger_reason": clean_command_value(item.get("trigger_reason"), f"固定任务 #{index} 触发原因"),
-            }
-        )
+        fixed_job = {
+            "name": clean_command_value(item.get("name"), f"固定任务 #{index} 名称"),
+            "enabled": bool(item.get("enabled", True)),
+            "time": validate_time_value(item.get("time"), f"固定任务 #{index} 时间"),
+            "trigger_reason": clean_command_value(item.get("trigger_reason"), f"固定任务 #{index} 触发原因"),
+        }
+        command = str(item.get("command") or "").strip()
+        if command:
+            fixed_job["command"] = clean_command_value(command, f"固定任务 #{index} 命令")
+        fixed_jobs.append(fixed_job)
     normalized["fixed_jobs"] = fixed_jobs
 
     sessions = []
@@ -1431,13 +1445,12 @@ def manual_run_status() -> Dict[str, Any]:
     with STATE.lock:
         process = STATE.active_process
         active = STATE.active_run
-        recent = list(STATE.recent_manual_runs)
 
     is_running = process is not None and process.poll() is None
     return {
         "running": is_running,
         "active": active if is_running else None,
-        "recent": recent[-10:],
+        "recent": read_jsonl(MANUAL_RUNS_PATH, limit=10),
     }
 
 
@@ -1445,13 +1458,12 @@ def initialization_status() -> Dict[str, Any]:
     with STATE.lock:
         process = STATE.initialization_process
         active = STATE.active_initialization
-        recent = list(STATE.recent_initializations)
 
     is_running = process is not None and process.poll() is None
     return {
         "running": is_running,
         "active": active if is_running else None,
-        "recent": recent[-8:],
+        "recent": read_jsonl(INITIALIZATION_RUNS_PATH, limit=8),
         "script": rel(INITIALIZATION_SCRIPT_PATH),
         "log_file": rel(INITIALIZATION_LOG_PATH),
         "log_tail": tail_text(INITIALIZATION_LOG_PATH, lines=18),
@@ -1483,7 +1495,7 @@ def start_initialization() -> Dict[str, Any]:
         "stopped_scheduler": scheduler_was_running,
     }
 
-    with INITIALIZATION_LOG_PATH.open("a", encoding="utf-8") as log_file:
+    with INITIALIZATION_LOG_PATH.open("w", encoding="utf-8") as log_file:
         log_file.write(f"[{now_str()}] dashboard starting initialization\n")
         log_file.flush()
         process = subprocess.Popen(
@@ -1516,6 +1528,11 @@ def start_initialization() -> Dict[str, Any]:
                 final["restarted_scheduler"] = True
             except Exception as exc:
                 final["restart_error"] = str(exc)
+
+        if return_code == 0:
+            with STATE.lock:
+                STATE.recent_manual_runs = []
+                STATE.recent_initializations = []
 
         append_jsonl(INITIALIZATION_RUNS_PATH, final)
 

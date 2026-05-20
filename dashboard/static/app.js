@@ -1219,6 +1219,7 @@ function createSchedulerRow(kind, item = {}) {
     row.appendChild(schedulerCell("名称", schedulerInput("text", "name", item.name || "", "premarket_0830")));
     row.appendChild(schedulerCell("时间", schedulerInput("time", "time", item.time || "09:30")));
     row.appendChild(schedulerCell("触发原因", schedulerInput("text", "trigger_reason", item.trigger_reason || "", "scheduled_premarket")));
+    row.appendChild(schedulerCell("命令", schedulerInput("text", "command", item.command || "", "留空使用主 Agent 命令")));
   }
 
   if (kind === "session") {
@@ -1415,8 +1416,41 @@ function handleSchedulerEditorClick(event) {
   }
 }
 
-function renderManual(data) {
+function latestInitializationDate(data) {
+  const initialization = data.initialization || {};
+  const values = [];
+
+  if (initialization.active) {
+    values.push(initialization.active.started_at);
+  }
+
+  (initialization.recent || []).forEach((run) => {
+    values.push(run.ended_at || run.started_at);
+  });
+
+  return latestDateTime(values);
+}
+
+function manualRunDate(run) {
+  return parseDateTime(run?.ended_at || run?.started_at || "");
+}
+
+function visibleManualRunState(data) {
   const manual = data.manual_run || {};
+  const cutoff = latestInitializationDate(data);
+  if (!cutoff) return manual;
+
+  return {
+    ...manual,
+    recent: (manual.recent || []).filter((run) => {
+      const runDate = manualRunDate(run);
+      return runDate && runDate > cutoff;
+    }),
+  };
+}
+
+function renderManual(data) {
+  const manual = visibleManualRunState(data);
   const running = Boolean(manual.running);
   const active = manual.active || {};
   const status = $("manualStatus");
@@ -1625,7 +1659,7 @@ function renderSystem(data) {
       ? `开始于 ${initialization.active?.started_at || "--"}`
       : latestInit
         ? `最近一次 ${latestInit.ended_at || latestInit.started_at || "--"} · ${latestInit.exit_code ?? "--"}`
-        : "清空运行数据并重置账户/市场状态"
+        : "清空运行数据、Alarm 和页面历史"
   );
 
   renderAlarm(data.alarm);
@@ -1662,7 +1696,7 @@ function stopScheduler() {
 }
 
 function initializeWorkspace() {
-  const ok = window.confirm("初始化会清空 pools/logs/memory/reports，并重置账户和市场状态。确定继续？");
+  const ok = window.confirm("初始化会清空 pools/logs/memory/reports、Alarm 和页面历史，并重置账户和市场状态。确定继续？");
   if (!ok) return;
   postControl("/api/initialize-workspace", "正在初始化 workspace...");
 }
