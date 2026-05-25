@@ -32,6 +32,7 @@ scheduler.out
 dashboard/runtime/
 workspace/logs/
 workspace/reports/
+workspace/diaries/
 workspace/memory/
 workspace/pools/*.jsonl
 workspace/state/*.json
