@@ -17,7 +17,7 @@
     ·
     <a href="#quick-start">Quick Start</a>
     ·
-    <a href="#windows-setup">Windows Setup</a>
+    <a href="#manual-setup">Manual Setup</a>
     ·
     <a href="#workspace-schema">Workspace Schema</a>
     ·
@@ -209,30 +209,13 @@ Before structured files are modified, the agent is instructed to read the schema
 
 ## Quick Start
 
-The recommended entry point is the local dashboard.
-
-### 1. Clone
+Default setup for Linux, macOS, or WSL:
 
 ```bash
 git clone https://github.com/BryanGao-1216/AstraTrade.git
 cd AstraTrade
-```
-
-### 2. Initialize
-
-```bash
 make setup
 ```
-
-`make setup` will:
-
-- Create `.venv`.
-- Install `requirements.txt`.
-- Copy `.env.example` to `.env` when missing.
-- Initialize missing workspace state files.
-- Generate `workspace/STYLE.md` from `config/investment_style.json`.
-
-### 3. Configure APIs
 
 Edit `.env`:
 
@@ -251,48 +234,19 @@ MX_API_URL=https://mkapi2.dfcfs.com/finskillshub
 
 `SUB_LLM_*` is used by subagents. If omitted, subagents fall back to the main `LLM_*` configuration field by field.
 
-### 4. Start Dashboard
-
 ```bash
 make dashboard
 ```
 
-Default URL:
+Open:
 
 ```text
 http://127.0.0.1:8787/
 ```
 
-Custom port:
+## Manual Setup
 
-```bash
-make dashboard PORT=9000
-```
-
-Direct launch:
-
-```bash
-python dashboard/server.py 8787
-```
-
-## Windows Setup
-
-The `Makefile` and `dashboard/start.sh` scripts are Unix-oriented. On Windows, `make` may not exist by default, and `sh dashboard/start.sh` can fail because many `sh` implementations do not support `pipefail`.
-
-### Recommended: WSL
-
-Use WSL Ubuntu when possible. Inside WSL, follow the normal Linux/macOS path:
-
-```bash
-git clone https://github.com/BryanGao-1216/AstraTrade.git
-cd AstraTrade
-make setup
-make dashboard
-```
-
-### Native Windows PowerShell
-
-If you are using PowerShell without `make`, run the equivalent commands manually:
+For Windows PowerShell or environments without `make`, run the setup commands manually:
 
 ```powershell
 git clone https://github.com/BryanGao-1216/AstraTrade.git
@@ -307,14 +261,11 @@ if (!(Test-Path .env)) {
 }
 ```
 
-Initialize the workspace with Bash if Git for Windows or another Bash environment is installed:
-
 ```powershell
 bash initialization.sh
 .\.venv\Scripts\python.exe -m runtime.investment_style
+notepad .env
 ```
-
-Then edit `.env` and start the dashboard:
 
 ```powershell
 $env:STOCK_AGENT_PYTHON = ".\.venv\Scripts\python.exe"
@@ -326,13 +277,6 @@ Open:
 ```text
 http://127.0.0.1:8787/
 ```
-
-Notes:
-
-- If PowerShell reports that `make` is not recognized, use the PowerShell commands above or switch to WSL.
-- If PowerShell reports that `bash` is not recognized, install Git for Windows or use WSL.
-- Do not run `sh dashboard/start.sh`; use `bash dashboard/start.sh` in a Bash environment, or start `dashboard\server.py` directly with Python.
-- Native Windows virtual environments use `.venv\Scripts\python.exe`, while Linux/macOS and WSL use `.venv/bin/python`.
 
 ## Common Commands
 
