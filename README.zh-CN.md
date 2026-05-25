@@ -17,6 +17,8 @@
     ·
     <a href="#快速开始">快速开始</a>
     ·
+    <a href="#windows-环境配置">Windows 环境配置</a>
+    ·
     <a href="#工作空间-schema">工作空间 Schema</a>
     ·
     <a href="#可复现性">可复现性</a>
@@ -272,6 +274,65 @@ make dashboard PORT=9000
 ```bash
 python dashboard/server.py 8787
 ```
+
+## Windows 环境配置
+
+项目中的 `Makefile` 和 `dashboard/start.sh` 更偏向 Unix 环境。在 Windows 上，系统默认可能没有 `make` 命令；如果使用 `sh dashboard/start.sh`，也可能因为当前 `sh` 不支持 `pipefail` 而报错。
+
+### 推荐方式：WSL
+
+优先推荐使用 WSL Ubuntu。在 WSL 里可以直接按照 Linux/macOS 的方式操作：
+
+```bash
+git clone https://github.com/BryanGao-1216/AstraTrade.git
+cd AstraTrade
+make setup
+make dashboard
+```
+
+### 原生 Windows PowerShell
+
+如果你在 PowerShell 中使用项目，并且没有 `make`，可以手动执行等价命令：
+
+```powershell
+git clone https://github.com/BryanGao-1216/AstraTrade.git
+cd AstraTrade
+
+py -3 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\pip.exe install -r requirements.txt
+
+if (!(Test-Path .env)) {
+  Copy-Item .env.example .env
+}
+```
+
+如果安装了 Git for Windows 或其他 Bash 环境，可以用 Bash 初始化 workspace：
+
+```powershell
+bash initialization.sh
+.\.venv\Scripts\python.exe -m runtime.investment_style
+```
+
+然后编辑 `.env`，启动 dashboard：
+
+```powershell
+$env:STOCK_AGENT_PYTHON = ".\.venv\Scripts\python.exe"
+.\.venv\Scripts\python.exe dashboard\server.py 8787
+```
+
+访问：
+
+```text
+http://127.0.0.1:8787/
+```
+
+注意：
+
+- 如果 PowerShell 提示 `make` 不是内部或外部命令，请使用上面的 PowerShell 命令，或切换到 WSL。
+- 如果 PowerShell 提示 `bash` 不是内部或外部命令，请安装 Git for Windows，或直接使用 WSL。
+- 不要使用 `sh dashboard/start.sh`；在 Bash 环境中请使用 `bash dashboard/start.sh`，或者直接用 Python 启动 `dashboard\server.py`。
+- 原生 Windows 的虚拟环境路径是 `.venv\Scripts\python.exe`，Linux/macOS 和 WSL 的路径是 `.venv/bin/python`。
 
 ## 常用命令
 
