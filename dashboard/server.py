@@ -51,6 +51,7 @@ INITIALIZATION_SCRIPT_PATH = ROOT / "initialization.sh"
 ENV_PATH = ROOT / ".env"
 DEFAULT_AGENT_ENV_NAME = "stagent"
 WORKSTREAM_ACTIVE_MAX_AGE_SECONDS = 30 * 60
+BUILTIN_SUBAGENT_NAMES = {"holding_follow", "candidate_follow", "trading_diary"}
 
 
 def resolve_agent_python() -> str:
@@ -460,13 +461,15 @@ def normalize_scheduler_config(config: Dict[str, Any]) -> Dict[str, Any]:
     for index, item in enumerate(config.get("market_subagents") or [], start=1):
         if not isinstance(item, dict):
             raise ValueError(f"子 Agent #{index} 必须是对象")
-        subagents.append(
-            {
-                "name": clean_command_value(item.get("name"), f"子 Agent #{index} 名称"),
-                "enabled": bool(item.get("enabled", True)),
-                "command": clean_command_value(item.get("command"), f"子 Agent #{index} 命令"),
-            }
-        )
+        subagent = {
+            "name": clean_command_value(item.get("name"), f"子 Agent #{index} 名称"),
+            "enabled": bool(item.get("enabled", True)),
+            "command": clean_command_value(item.get("command"), f"子 Agent #{index} 命令"),
+        }
+        trigger_time = str(item.get("time") or item.get("trigger_time") or "").strip()
+        if trigger_time:
+            subagent["time"] = validate_time_value(trigger_time, f"子 Agent #{index} 触发时间")
+        subagents.append(subagent)
     normalized["market_subagents"] = subagents
 
     return normalized
@@ -491,7 +494,7 @@ def validate_no_new_subagents(config: Dict[str, Any]) -> None:
         if isinstance(item, dict) and str(item.get("name") or "").strip()
     }
 
-    unknown = sorted(incoming_names - current_names)
+    unknown = sorted(incoming_names - current_names - BUILTIN_SUBAGENT_NAMES)
     if unknown:
         raise ValueError(f"当前系统不支持新增子 Agent: {', '.join(unknown)}")
 

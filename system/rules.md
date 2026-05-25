@@ -47,6 +47,7 @@
 
 ## 策略池规则
 
+- 每条持仓池中的持仓必须对应一条策略，如果存在没有对应策略的持仓，必须为其创建一条策略
 - `pools/strategies.jsonl` 只保存尚未执行完成、仍需跟踪的有效策略
 - 策略执行完成后，必须从 `pools/strategies.jsonl` 删除
 - 策略失效、过期或被明确终止后，也应从 `pools/strategies.jsonl` 删除

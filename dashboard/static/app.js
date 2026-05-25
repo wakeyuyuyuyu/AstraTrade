@@ -669,11 +669,13 @@ function renderSchedulerOverview(configPayload) {
   const midJobs = fixedJobs.filter((job) => triggerBucket(job) === "mid");
   const postJobs = fixedJobs.filter((job) => triggerBucket(job) === "post");
   const activeSubagents = subagents.filter((item) => item.enabled !== false);
+  const marketSubagents = subagents.filter((item) => !item.time);
+  const activeMarketSubagents = marketSubagents.filter((item) => item.enabled !== false);
 
   text("schedulerIntervalSummary", marketIntervalLabel(sessions));
   text("schedulerFixedSummary", `${preJobs.filter((job) => job.enabled !== false).length} 次`);
   text("schedulerSessionSummary", `${midJobs.filter((job) => job.enabled !== false).length} 次`);
-  text("schedulerSubagentSummary", `${postJobs.filter((job) => job.enabled !== false).length} 次`);
+  text("schedulerSubagentSummary", `${activeSubagents.length}/${subagents.length}`);
 
   const list = $("schedulerTriggerList");
   if (!list) return;
@@ -701,7 +703,7 @@ function renderSchedulerOverview(configPayload) {
     kind: "mid",
     label: "LIVE",
     title: "盘中巡检",
-    count: `${sessions.length} 段 · ${activeSubagents.length}/${subagents.length} agent`,
+    count: `${sessions.length} 段 · ${activeMarketSubagents.length}/${marketSubagents.length} agent`,
     times: sessionTimeChips(sessions),
     emptyTitle: "暂无盘中巡检",
   });
@@ -1233,6 +1235,7 @@ function createSchedulerRow(kind, item = {}) {
     const nameInput = schedulerInput("text", "name", item.name || "", "holding_follow");
     nameInput.readOnly = true;
     row.appendChild(schedulerCell("名称", nameInput));
+    row.appendChild(schedulerCell("触发时间", schedulerInput("time", "time", item.time || "")));
     row.appendChild(schedulerCell("命令", schedulerInput("text", "command", item.command || "", "python -m subagent.holding_follow.exec_agent")));
   }
 
@@ -1341,6 +1344,10 @@ function validateSchedulerConfig(config) {
 
   for (const [index, subagent] of config.market_subagents.entries()) {
     if (!subagent.name) return `子 Agent #${index + 1} 名称不能为空`;
+    if (subagent.time) {
+      const timeError = validateTimeInput(subagent.time, `子 Agent #${index + 1} 触发时间`);
+      if (timeError) return timeError;
+    }
     if (!subagent.command) return `子 Agent #${index + 1} 命令不能为空`;
   }
 

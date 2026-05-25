@@ -235,10 +235,10 @@ python -m runtime.agent
 - 工作日运行。
 - 盘前唤醒、盘中唤醒、盘后唤醒：固定时间直接唤醒主 Agent。
 - 盘中巡检：交易时段每 10 分钟先运行持仓/候选池子 Agent，再由子 Agent 按需触发主 Agent。
-- 盘中巡检子 Agent：默认包含 `holding_follow` 和 `candidate_follow`。
+- 子 Agent：默认包含盘中巡检的 `holding_follow` / `candidate_follow`，以及按固定时间触发的 `trading_diary`。
 - 日志写入 `workspace/logs/scheduler/`。
 
-也可以在 dashboard 的「调度配置」页面修改这些规则。当前页面支持修改固定唤醒任务、盘中巡检时段、已有子 Agent 的启用状态和命令；不支持用户直接新增子 Agent。
+也可以在 dashboard 的「调度配置」页面修改这些规则。当前页面支持修改固定唤醒任务、盘中巡检时段、已有子 Agent 的启用状态、触发时间和命令；不支持用户直接新增子 Agent。
 
 ### Manual 模式
 

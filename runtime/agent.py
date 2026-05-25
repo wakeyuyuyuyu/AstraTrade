@@ -267,7 +267,11 @@ def run_fixed_main_agent(now: datetime, cfg: dict, job: dict) -> None:
 
 
 def run_market_subagents(now: datetime, cfg: dict) -> None:
-    subagents = cfg.get("market_subagents", [])
+    subagents = [
+        subagent
+        for subagent in cfg.get("market_subagents", [])
+        if not str(subagent.get("time", "")).strip()
+    ]
 
     if not subagents:
         write_log("MARKET_TRIGGER matched but no market_subagents configured")
@@ -289,6 +293,33 @@ def run_market_subagents(now: datetime, cfg: dict) -> None:
             continue
 
         run_command(name, command)
+
+
+def get_due_timed_subagents(now: datetime, cfg: dict) -> list[dict]:
+    cur_hm = now.strftime("%H:%M")
+
+    return [
+        subagent
+        for subagent in cfg.get("market_subagents", [])
+        if subagent.get("enabled", True)
+        and str(subagent.get("time", "")).strip() == cur_hm
+    ]
+
+
+def run_timed_subagent(now: datetime, subagent: dict) -> None:
+    name = subagent.get("name", "unknown_subagent")
+    command = subagent.get("command", "").strip()
+
+    if not command:
+        write_log(f"SKIP timed_subagent={name} reason=empty_command")
+        return
+
+    write_log(
+        f"SUBAGENT_TRIGGER matched time={now.strftime('%Y-%m-%d %H:%M')} "
+        f"name={name}"
+    )
+
+    run_command(name, command)
 
 
 def get_alarm_key(now: datetime, alarm: dict) -> str:
@@ -471,6 +502,13 @@ def main() -> None:
                 if key not in last_run_keys:
                     last_run_keys.add(key)
                     run_fixed_main_agent(now, cfg, fixed_job)
+
+            for subagent in get_due_timed_subagents(now, cfg):
+                key = f"subagent:{minute_key}:{subagent.get('name', '')}"
+
+                if key not in last_run_keys:
+                    last_run_keys.add(key)
+                    run_timed_subagent(now, subagent)
 
             if in_market_schedule(now, cfg):
                 key = f"market_subagents:{minute_key}"

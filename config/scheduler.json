@@ -47,13 +47,6 @@
       "trigger_reason": "scheduled_review"
     },
     {
-      "name": "trading_diary_1920",
-      "enabled": true,
-      "time": "19:20",
-      "trigger_reason": "scheduled_trading_diary",
-      "command": "python -m subagent.trading_diary.exec_agent"
-    },
-    {
       "name": "night_plan",
       "enabled": true,
       "time": "20:00",
@@ -82,6 +75,12 @@
       "name": "candidate_follow",
       "enabled": true,
       "command": "python -m subagent.candidate_follow.exec_agent"
+    },
+    {
+      "name": "trading_diary",
+      "enabled": true,
+      "time": "19:20",
+      "command": "python -m subagent.trading_diary.exec_agent"
     }
   ]
 }
