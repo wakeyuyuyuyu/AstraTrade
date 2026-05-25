@@ -1,98 +1,238 @@
 <div align="center">
   <img src="assets/astra-trade-logo.png" alt="AstraTrade Logo" width="420">
   <br>
-  <p><strong>面向 A 股研究、模拟交易与自动化决策的本地 Agent 控制台</strong></p>
+  <h1>AstraTrade</h1>
+  <p><strong>A Persistent Workspace Architecture for Long-Horizon Financial Agents</strong></p>
+  <p>
+    <strong>English</strong>
+    ·
+    <a href="README.zh-CN.md">中文</a>
+  </p>
   <p>
     <a href="https://github.com/BryanGao-1216/AstraTrade">GitHub Repository</a>
     ·
-    <a href="#快速开始">快速开始</a>
+    <a href="#abstract">Abstract</a>
     ·
-    <a href="#控制台能力">控制台能力</a>
+    <a href="#architecture">Architecture</a>
     ·
-    <a href="#系统流程图">系统流程图</a>
+    <a href="#quick-start">Quick Start</a>
     ·
-    <a href="#运行模式">运行模式</a>
+    <a href="#workspace-schema">Workspace Schema</a>
     ·
-    <a href="#数据文件">数据文件</a>
+    <a href="#reproducibility">Reproducibility</a>
   </p>
   <p>
     <img src="https://img.shields.io/badge/Python-3.10%2B-blue?logo=python" alt="Python 3.10+">
+    <img src="https://img.shields.io/badge/Agent-Long--Horizon-7c3aed" alt="Long-Horizon Agent">
+    <img src="https://img.shields.io/badge/Workspace-Persistent%20Memory-64a8ff" alt="Persistent Workspace">
     <img src="https://img.shields.io/badge/Dashboard-Local%20Web-20d0a2" alt="Local Dashboard">
-    <img src="https://img.shields.io/badge/LLM-OpenAI%20Compatible-7c3aed" alt="OpenAI Compatible LLM">
+    <img src="https://img.shields.io/badge/LLM-OpenAI%20Compatible-111827" alt="OpenAI Compatible LLM">
     <img src="https://img.shields.io/badge/Market-A%20Share-f59e0b" alt="A Share Market">
-    <img src="https://img.shields.io/badge/Workspace-Local%20Memory-64a8ff" alt="Local Workspace">
     <img src="https://img.shields.io/badge/License-Private-lightgrey" alt="Private License">
   </p>
 </div>
 
 ---
 
-## 核心亮点
+## Abstract
 
-| 重点 | 说明 |
+`AstraTrade` is a local-first research prototype for studying long-horizon financial agents under persistent state, scheduled execution, event-triggered intervention, and auditable decision traces.
+
+Instead of treating an LLM as a stateless trading assistant, AstraTrade frames the agent as a recurrent decision process operating over a durable filesystem workspace. The workspace stores account state, market state, candidate assets, active strategies, holdings, event logs, daily memory, run prompts, model outputs, tool traces, and schema constraints. A mode-aware runtime then rehydrates this workspace into each invocation, allowing the agent to continue a financial research and simulated trading process across market phases, manual instructions, and subagent-generated triggers.
+
+The system is designed for research, simulation, and architecture exploration. It is not financial advice, not an autonomous real-money trading system, and should not be used to execute real transactions without independent human verification.
+
+## Problem Setting
+
+Financial agents differ from one-shot question-answering systems in several important ways:
+
+| Challenge | System Requirement |
 | --- | --- |
-| 三种唤醒模式 + Alarm | 主 Agent 支持 `scheduler` 定时巡检、`manual` 人工指令、`trigger` 事件触发；Alarm 可把一次性或周期性任务转成到点自动执行的人工任务 |
-| 三类交易工作池 | `持仓池` 跟踪当前仓位和盈亏，`策略池` 保存买卖计划与风控条件，`候选池` 沉淀观察标的和触发条件 |
-| 主 Agent / 子 Agent 协作 | 主 Agent 负责综合判断、文件更新和最终决策；持仓/候选子 Agent 负责盘中盯盘，满足条件时唤醒主 Agent |
-| 模型分层配置 | 主 Agent 使用 `LLM_*` 配置；子 Agent 使用 `SUB_LLM_*` 配置 |
+| Long temporal horizon | The agent must preserve plans, evidence, positions, and unresolved tasks across days. |
+| Non-stationary environment | Market phase, risk regime, data availability, and user objectives change over time. |
+| Decision accountability | Each action should be traceable to inputs, tool calls, model outputs, and persisted state changes. |
+| Mixed initiative | Scheduled jobs, human instructions, alarms, and market subagents all need to wake the same main agent. |
+| State integrity | Structured financial state must be updated under explicit schema and file protocols. |
 
-## 系统流程图
+AstraTrade addresses these requirements by placing a persistent workspace between the model and the financial environment. The LLM does not own hidden memory; it reads and writes explicit artifacts through a controlled tool layer.
+
+## Contributions
+
+This repository implements five architectural ideas for long-horizon financial agents:
+
+| Contribution | Description |
+| --- | --- |
+| Persistent workspace substrate | `workspace/` serves as externalized memory for state, pools, logs, reports, skills, phase descriptions, and daily summaries. |
+| Mode-aware recurrent runtime | The main agent can be invoked as `scheduler`, `manual`, or `trigger`, with each mode producing different context and execution constraints. |
+| Pool-based financial state model | Holdings, strategies, and candidates are separated into durable pools, enabling monitoring, delayed execution, and multi-step research. |
+| Hierarchical agent orchestration | Specialized subagents monitor holdings and candidates during market sessions, then wake the main agent only when a condition requires higher-level reasoning. |
+| Auditable execution protocol | Every run stores rendered prompts, final results, step traces, tool calls, protocol retries, and scheduler logs for later inspection. |
+
+## Architecture
 
 <p align="center">
   <img src="assets/astra-trade-system-architecture.png" alt="AstraTrade System Architecture">
 </p>
 
-## 项目简介
+At a high level, AstraTrade consists of a persistent workspace, a runtime context builder, a protocol-constrained agent loop, domain-specific skills, subagents, and a local dashboard.
 
-`AstraTrade` 是一个本地优先的 A 股研究与模拟交易 Agent 系统，用于自动化市场盯盘、策略制定、模拟交易记录和复盘分析。系统以 `workspace/` 作为本地工作空间，围绕账户状态、市场状态、持仓池、策略池、候选池组织日常工作。
+```mermaid
+flowchart LR
+  A["Scheduler / Manual Task / Trigger Event / Alarm"] --> B["Runtime Launcher"]
+  B --> C["Context Builder"]
+  C --> D["Persistent Workspace"]
+  D --> C
+  C --> E["Prompt Renderer"]
+  E --> F["Main Agent Loop"]
+  F --> G["Controlled Tool Layer"]
+  G --> D
+  G --> H["Financial Skills"]
+  F --> I["Reports and Traces"]
+  J["Holding and Candidate Subagents"] --> A
+  K["Local Dashboard"] --> A
+  K --> D
+```
 
-支持自定义配置投资风格，子 Agent 在开盘期间自动执行盯盘；主 Agent 支持 `manual`、`scheduler`、`trigger` 三种唤醒模式，并可通过 Alarm 将自然语言提醒转化为到点执行的任务。
+### 1. Persistent Workspace
 
-> 免责声明：本项目用于研究、模拟交易、策略验证和自动化复盘，不构成投资建议。任何真实交易动作都应由用户自行核验行情、账户、持仓、风控和工具返回结果后再决定。
+The workspace is the central architectural primitive. It makes long-horizon behavior explicit by storing facts and decisions as files:
 
-## 一眼看懂
+- `state/` stores account and market state.
+- `pools/` stores holdings, strategies, and candidates as JSONL records.
+- `logs/` stores trades, events, scheduler output, and per-run execution traces.
+- `reports/` stores the rendered prompt and final result for each main-agent run.
+- `memory/` stores daily summaries and next-day plans.
+- `skills/` stores local financial tools and schema references.
+- `phases/` stores market-phase-specific operating instructions.
 
-| 能力 | 说明 |
+This design favors observability and reproducibility over opaque hidden memory.
+
+### 2. Runtime and Invocation Modes
+
+The main runtime entry point is `runtime/launcher.py`. Each invocation is normalized into one of three modes:
+
+| Mode | Primary Use | Example |
+| --- | --- | --- |
+| `scheduler` | Periodic market-phase inspection and routine review. | Premarket planning, intraday check, postmarket review. |
+| `manual` | Human-issued natural-language task. | "Analyze whether 300059 should enter the candidate pool." |
+| `trigger` | Event-driven response from subagents or external systems. | A candidate reaches a trigger condition. |
+
+The runtime builds a fresh context from the workspace on every call. This context includes time, market phase, trigger metadata, account state, market state, pool summaries, recent trades, and recent events.
+
+### 3. Protocol-Constrained Agent Loop
+
+The main loop in `runtime/agent_loop.py` constrains model output to three JSON message types:
+
+| Type | Purpose |
 | --- | --- |
-| 多模式唤醒 | `manual`、`scheduler`、`trigger` 三种主 Agent 调用方式，并支持 Alarm 定时触发人工任务 |
-| 池子体系 | 持仓池、策略池、候选池分别承载当前仓位、执行计划和观察标的 |
-| Agent 协作 | 主 Agent 负责最终判断，持仓/候选子 Agent 负责盘中监控；主/子 Agent 可分别配置模型 |
-| 本地控制台 | 账户状态、市场状态、池子看板、调度配置、人工指令、运行轨迹集中在一个 dashboard |
-| 自动巡检 | 支持盘前唤醒、盘中巡检、盘后复盘，以及持仓/候选池子 Agent 盯盘 |
-| 长期记忆 | 所有状态、日志、报告、策略与 skills 保存在 `workspace/`，便于回溯和迁移 |
-| 风格约束 | 通过 `config/investment_style.json` 生成 `workspace/STYLE.md`，约束交易周期、风险偏好和仓位风格 |
-| 受控写入 | `read/write/edit/add/exec` 统一经过工具层；结构化文件写入后会按 schema 校验，失败会返回明确错误 |
-| 结构化复盘 | 每轮 Agent 调用会落盘 prompt、逐步输入输出、工具结果、run summary 和完整运行轨迹 |
-| 金融 Skills | 集成 `mx-data`、`mx-search`、`mx-moni` 等本地 skill，用于行情、资讯和模拟交易 |
+| `thinking` | Brief intermediate reasoning that identifies the next action. |
+| `tool_call` | A single structured request to read, write, edit, append, execute, or use skills. |
+| `final` | The terminal run summary, including actions, decisions, tool calls, file updates, and next tasks. |
 
-## 快速开始
+Malformed outputs are fed back to the model as protocol errors and retried. This creates a lightweight execution contract between the model and the environment.
 
-dashboard 是项目的默认入口。新用户建议先启动本地控制台，再通过页面完成 API 配置、投资风格配置、scheduler 配置、人工指令提交和运行轨迹复盘。
+### 4. Controlled Tool Layer
 
-### 1. 克隆项目
+The tool layer in `tools/` mediates all workspace interaction:
+
+- File paths must remain inside `workspace/`.
+- Structured writes are checked against the `astra-trade-schema` skill.
+- JSON and JSONL files are parsed and validated after write operations.
+- Tool results are recorded in run traces.
+- Shell execution is restricted by explicit command rules.
+
+This layer is intentionally conservative. It treats financial state as a database-like artifact rather than as free-form text.
+
+### 5. Hierarchical Subagents
+
+Subagents provide narrow, low-cost surveillance loops:
+
+| Subagent | Role |
+| --- | --- |
+| `holding_follow` | Monitors active holdings and related strategies. |
+| `candidate_follow` | Monitors watchlist candidates and trigger conditions. |
+| `trading_diary` | Generates a daily narrative diary from account state, market state, pools, trades, and events. |
+
+During market sessions, the scheduler can run subagents every configured interval. When a subagent detects a relevant condition, it records an event and invokes the main agent in `trigger` mode.
+
+### 6. Local Dashboard
+
+The dashboard is a local observability and control surface. It supports:
+
+- Viewing account state, market state, holdings, strategies, candidates, and recent runs.
+- Submitting manual tasks.
+- Starting and stopping the scheduler.
+- Editing API configuration.
+- Editing investment-style parameters.
+- Inspecting prompts, results, and run traces.
+
+The dashboard is not required for the architecture, but it makes the persistent workspace inspectable and operational.
+
+## Execution Lifecycle
+
+The default lifecycle is configured in `config/scheduler.json`.
+
+| Phase | Mechanism | Typical Operation |
+| --- | --- | --- |
+| Premarket | Fixed scheduled jobs | Update market view, prepare candidates, review risk constraints. |
+| Intraday | Interval subagent checks | Monitor holdings and candidates; escalate triggers to the main agent. |
+| Lunch break | Fixed scheduled job | Reassess morning state and unresolved tasks. |
+| Postmarket | Fixed scheduled job | Review decisions, update summaries, generate next steps. |
+| Evening | Fixed scheduled jobs and diary | Produce retrospective notes and next-day plans. |
+| Anytime | Manual task or alarm | Execute user-defined research, review, or delayed follow-up. |
+
+This lifecycle makes the agent recurrent without requiring a constantly running LLM. The scheduler wakes computation only at meaningful times.
+
+## Workspace Schema
+
+Core structured files are documented in `workspace/skills/astra-trade-schema/`.
+
+| File | Description |
+| --- | --- |
+| `workspace/state/account_state.json` | Cash, assets, market value, position count, and risk limits. |
+| `workspace/state/market_state.json` | Market view, risk level, themes, sectors, key events, and evidence. |
+| `workspace/pools/holdings.jsonl` | Current holdings and their execution context. |
+| `workspace/pools/strategies.jsonl` | Active and pending strategies, including entry, exit, stop-loss, and sizing plans. |
+| `workspace/pools/candidates.jsonl` | Watchlist assets, triggers, buy plans, risks, evidence, and next actions. |
+| `workspace/logs/trades.jsonl` | Simulated trade records. |
+| `workspace/logs/events.jsonl` | External events, subagent triggers, and system events. |
+| `workspace/logs/agent_runs.jsonl` | Index of main-agent invocations. |
+| `workspace/logs/agent_runs/{run_id}/` | Step-level model outputs, tool results, run summary, and full trace. |
+| `workspace/reports/{run_id}_prompt.md` | The exact prompt rendered for a run. |
+| `workspace/reports/{run_id}_result.json` | The normalized final result of a run. |
+| `workspace/memory/{date}/summary.md` | Daily summary memory. |
+| `workspace/memory/{date}/plan.md` | Next-day plan memory. |
+
+Before structured files are modified, the agent is instructed to read the schema skill and corresponding reference. The file tool then performs validation and returns explicit errors when the schema is violated.
+
+## Quick Start
+
+The recommended entry point is the local dashboard.
+
+### 1. Clone
 
 ```bash
 git clone https://github.com/BryanGao-1216/AstraTrade.git
 cd AstraTrade
 ```
 
-### 2. 一键初始化
+### 2. Initialize
 
 ```bash
 make setup
 ```
 
-`make setup` 会完成：
+`make setup` will:
 
-- 创建 `.venv`
-- 安装 `requirements.txt`
-- 从 `.env.example` 复制生成本地 `.env`
-- 初始化缺失的 `workspace` 状态文件
-- 生成 `workspace/STYLE.md`
+- Create `.venv`.
+- Install `requirements.txt`.
+- Copy `.env.example` to `.env` when missing.
+- Initialize missing workspace state files.
+- Generate `workspace/STYLE.md` from `config/investment_style.json`.
 
-### 3. 配置 API
+### 3. Configure APIs
 
-编辑 `.env`，填入自己的 API Key 和模型配置：
+Edit `.env`:
 
 ```bash
 LLM_API_KEY=your_llm_api_key
@@ -107,150 +247,67 @@ MX_APIKEY=your_mx_api_key
 MX_API_URL=https://mkapi2.dfcfs.com/finskillshub
 ```
 
-`SUB_LLM_*` 用于持仓/候选子 Agent；如果不配置，会逐项回退到主 Agent 的 `LLM_*` 配置。
+`SUB_LLM_*` is used by subagents. If omitted, subagents fall back to the main `LLM_*` configuration field by field.
 
-### 4. 启动 dashboard
+### 4. Start Dashboard
 
 ```bash
 make dashboard
 ```
 
-默认访问地址：
+Default URL:
 
 ```text
 http://127.0.0.1:8787/
 ```
 
-指定端口：
+Custom port:
 
 ```bash
 make dashboard PORT=9000
 ```
 
-也可以直接启动后端：
+Direct launch:
 
 ```bash
 python dashboard/server.py 8787
 ```
 
-## 控制台能力
+## Common Commands
 
-| 页面 | 能做什么 |
+| Command | Description |
 | --- | --- |
-| 主控制台 | 查看账户状态、市场状态、持仓池、策略池、候选池和系统控制 |
-| 调用轨迹 | 打开某次主 Agent 调用，复盘模型输出、工具调用和最终结果 |
-| 投资风格配置 | 调整投资周期、风险偏好、选股偏好、交易频率、仓位风格和止盈止损风格 |
-| API 配置 | 管理 LLM 与金融数据 API 的本地环境变量 |
-| 调度配置 | 配置盘前唤醒、盘中巡检、盘后复盘和已有子 Agent 命令 |
+| `make setup` | Create virtual environment, install dependencies, generate `.env`, and initialize workspace. |
+| `make dashboard` | Start the local dashboard. |
+| `make init` | Reinitialize workspace state, pools, logs, memory, reports, and alarm config. |
+| `make run` | Execute one main-agent run in `scheduler` mode. |
+| `make scheduler` | Start the long-running scheduler. |
+| `make manual TASK="..."` | Execute one human-specified task in `manual` mode. |
+| `make style` | Regenerate `workspace/STYLE.md` from investment-style config. |
+| `make check` | Compile-check the main Python modules. |
+| `make clean` | Remove Python cache files. |
 
-主控制台中可以直接完成：
-
-- 查看账户资产、现金、持仓市值、风险限制和风控状态。
-- 查看市场观点、风险等级、热点主题、关注板块和关键事件。
-- 输入人工指令并触发主 Agent。
-- 启动或停止 scheduler。
-- 初始化 workspace。
-- 查看最近执行过的 scheduler 调用和时间。
-
-## 常用命令
-
-| 命令 | 说明 |
-| --- | --- |
-| `make setup` | 创建虚拟环境、安装依赖、生成 `.env` 和默认 workspace |
-| `make dashboard` | 启动本地 dashboard |
-| `make init` | 初始化 workspace，清空运行数据并重置账户/市场状态 |
-| `make run` | 执行一次主 Agent scheduler 模式 |
-| `make scheduler` | 启动常驻 scheduler |
-| `make manual TASK="..."` | 执行一条人工自然语言指令 |
-| `make style` | 根据投资风格配置重新生成 `workspace/STYLE.md` |
-| `make check` | 编译检查主要 Python 文件 |
-| `make clean` | 清理 Python 缓存文件 |
-
-示例：
+Example:
 
 ```bash
 make manual TASK="检查当前持仓和候选池，给出下一步观察重点"
 ```
 
-## 模块说明
+## Manual Runtime Usage
 
-| 模块 | 作用 |
-| --- | --- |
-| `dashboard/` | 本地控制台，用于查看状态、提交人工指令、配置风格/API/scheduler、控制 scheduler 和复盘轨迹 |
-| `runtime/launcher.py` | 主 Agent 单次运行入口，负责进入 scheduler、manual 或 trigger 模式 |
-| `runtime/agent_loop.py` | LLM 循环与工具调用执行器，记录每一步输入、输出、工具结果和完整轨迹 |
-| `runtime/agent.py` | 常驻调度器，根据 `config/scheduler.json` 执行主 Agent 唤醒、Alarm 和盘中子 Agent 巡检 |
-| `subagent/` | 持仓池和候选池盯盘逻辑 |
-| `workspace/` | 本地长期记忆，保存状态、池子、日志、报告和 skills |
-| `system/` | 核心提示词、模式规则、工具协议和输出协议 |
-| `tools/` | 受控工具层，负责 workspace 文件读写、命令执行、skills 摘要读取和结构化文件校验 |
-
-## 手动安装
-
-如果不使用 `make`，可以手动执行：
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-python -m runtime.investment_style
-bash dashboard/start.sh 8787
-```
-
-## 环境变量
-
-| 变量 | 必填 | 说明 |
-| --- | --- | --- |
-| `LLM_API_KEY` | 是 | OpenAI 兼容接口密钥 |
-| `LLM_URL` | 是 | OpenAI 兼容接口地址，通常以 `/v1` 结尾 |
-| `LLM_MODEL` | 是 | 主 Agent 模型名称 |
-| `SUB_LLM_API_KEY` | 否 | 子 Agent OpenAI 兼容接口密钥；不填则回退 `LLM_API_KEY` |
-| `SUB_LLM_URL` | 否 | 子 Agent OpenAI 兼容接口地址；不填则回退 `LLM_URL` |
-| `SUB_LLM_MODEL` | 否 | 子 Agent 模型名称；不填则回退 `LLM_MODEL` |
-| `MX_APIKEY` | 否 | 东方财富妙想 Skills API Key，用于金融数据、资讯和模拟组合 |
-| `MX_API_URL` | 否 | 妙想 API 地址 |
-| `TRADINGAGENTS_TOKEN` | 否 | TradingAgents 服务 Token |
-| `TRADINGAGENTS_API_URL` | 否 | TradingAgents 服务地址 |
-| `STOCK_AGENT_PYTHON` | 否 | 指定 dashboard 启动 Agent 子进程时使用的 Python |
-
-## 运行模式
-
-### Scheduler 模式
-
-执行一次 scheduler 巡检：
+Run one scheduled inspection:
 
 ```bash
 python -m runtime.launcher --mode scheduler
 ```
 
-启动常驻调度器：
-
-```bash
-python -m runtime.agent
-```
-
-调度规则位于 `config/scheduler.json`，默认包含：
-
-- 工作日运行。
-- 盘前唤醒、盘中唤醒、盘后唤醒：固定时间直接唤醒主 Agent。
-- 盘中巡检：交易时段每 10 分钟先运行持仓/候选池子 Agent，再由子 Agent 按需触发主 Agent。
-- 子 Agent：默认包含盘中巡检的 `holding_follow` / `candidate_follow`，以及按固定时间触发的 `trading_diary`。
-- 日志写入 `workspace/logs/scheduler/`。
-
-也可以在 dashboard 的「调度配置」页面修改这些规则。当前页面支持修改固定唤醒任务、盘中巡检时段、已有子 Agent 的启用状态、触发时间和命令；不支持用户直接新增子 Agent。
-
-### Manual 模式
-
-只要传入 `--task`，系统会进入人工任务模式：
+Run one manual task:
 
 ```bash
 python -m runtime.launcher --task "分析 300059 是否值得加入候选池"
 ```
 
-### Trigger 模式
-
-用于外部事件触发：
+Run one trigger-mode invocation:
 
 ```bash
 python -m runtime.launcher \
@@ -259,132 +316,133 @@ python -m runtime.launcher \
   --trigger-event '{"source":"manual","symbol":"300059","trigger_type":"manual","reason":"人工检查"}'
 ```
 
-## 子 Agent
+Start the resident scheduler:
 
-子 Agent 用于盘中巡检。scheduler 会在交易时段先调用已有子 Agent，同步持仓或候选池状态，并在满足条件时按需唤醒主 Agent。
+```bash
+python -m runtime.agent
+```
 
-当前 dashboard 不支持用户新增子 Agent；页面只能配置已有子 Agent 的启用状态和命令。若需要新增一种子 Agent，需要在代码中实现对应模块，并同步更新调度配置与执行逻辑。
-
-### 持仓盯盘
+Run subagents directly:
 
 ```bash
 python -m subagent.holding_follow.exec_agent
+python -m subagent.candidate_follow.exec_agent
+python -m subagent.trading_diary.exec_agent
 ```
 
-常用参数：
+Useful subagent flags:
 
 ```bash
 python -m subagent.holding_follow.exec_agent --dry-run
 python -m subagent.holding_follow.exec_agent --no-update
-```
-
-### 候选池盯盘
-
-```bash
-python -m subagent.candidate_follow.exec_agent
-```
-
-常用参数：
-
-```bash
 python -m subagent.candidate_follow.exec_agent --dry-run
 python -m subagent.candidate_follow.exec_agent --no-update
 ```
 
-## 目录结构
+## Repository Layout
 
 ```text
 AstraTrade/
 ├── config/
-│   ├── investment_style.json        # 投资风格配置
-│   └── scheduler.json               # 调度配置
+│   ├── alarm.json                   # Delayed and recurring alarm tasks
+│   ├── investment_style.json        # Investment-style configuration
+│   └── scheduler.json               # Scheduler and subagent configuration
 ├── dashboard/
-│   ├── server.py                    # dashboard 后端
-│   ├── start.sh                     # dashboard 启动脚本
-│   └── static/                      # dashboard 前端
+│   ├── server.py                    # Local dashboard backend
+│   ├── start.sh                     # Dashboard launcher
+│   └── static/                      # Dashboard frontend
 ├── runtime/
-│   ├── agent_loop.py                # LLM 循环和工具调用执行器
-│   ├── build_context.py             # 动态上下文构建
-│   ├── investment_style.py          # 投资风格生成器
-│   ├── launcher.py                  # 主 Agent 单次运行入口
-│   ├── render_prompt.py             # 系统 prompt 渲染
-│   └── agent.py                     # 常驻调度器与 Alarm runner
+│   ├── agent.py                     # Resident scheduler and alarm runner
+│   ├── agent_loop.py                # LLM loop and tool-call executor
+│   ├── build_context.py             # Runtime context construction
+│   ├── investment_style.py          # STYLE.md generator
+│   ├── launcher.py                  # Single-run main-agent entry point
+│   └── render_prompt.py             # System prompt rendering
 ├── services/
-│   └── llm_service.py               # OpenAI 兼容模型调用
+│   └── llm_service.py               # OpenAI-compatible model client
 ├── subagent/
-│   ├── candidate_follow/            # 候选池盯盘子 Agent
-│   └── holding_follow/              # 持仓盯盘子 Agent
+│   ├── candidate_follow/            # Candidate monitoring subagent
+│   ├── holding_follow/              # Holding monitoring subagent
+│   └── trading_diary/               # Daily diary generator
 ├── system/
-│   ├── core_prompt.md               # 核心系统提示
-│   ├── file_protocol.md             # 文件读写协议
-│   ├── output_contract.md           # 输出协议
-│   ├── rules.md                     # 行为规则
-│   ├── tools.md                     # 工具定义
-│   └── modes/                       # scheduler/manual/trigger 模式规则
+│   ├── core_prompt.md               # Core system instruction
+│   ├── file_protocol.md             # Workspace file protocol
+│   ├── output_contract.md           # JSON output protocol
+│   ├── rules.md                     # Runtime behavior rules
+│   ├── tools.md                     # Tool definitions
+│   └── modes/                       # Mode-specific instructions
 ├── tools/
-│   ├── exec.py                      # 受限命令执行
-│   ├── file_tools.py                # workspace 文件工具与 schema 校验
-│   └── list_skills.py               # skills 摘要读取
+│   ├── exec.py                      # Restricted command executor
+│   ├── file_tools.py                # Workspace file tools and validation
+│   └── list_skills.py               # Skill summary reader
 ├── workspace/
-│   ├── MARKET.md                    # A 股市场背景
-│   ├── STYLE.md                     # 生成后的投资风格约束
-│   ├── phases/                      # 不同交易阶段说明
-│   ├── skills/                      # 本地 skills 与数据 schema
-│   ├── state/                       # 账户和市场状态
-│   ├── pools/                       # 持仓池、策略池、候选池
-│   ├── logs/                        # 运行日志
-│   └── reports/                     # prompt 和结果输出
-├── .env.example                     # 环境变量模板
-├── Makefile                         # 常用命令入口
-├── initialization.sh                 # workspace 初始化脚本
-└── requirements.txt                  # Python 依赖
+│   ├── MARKET.md                    # A-share market background
+│   ├── STYLE.md                     # Generated style constraints
+│   ├── phases/                      # Market-phase instructions
+│   ├── skills/                      # Local skills and schemas
+│   ├── state/                       # Account and market state
+│   ├── pools/                       # Holdings, strategies, candidates
+│   ├── logs/                        # Events, trades, scheduler, run traces
+│   ├── memory/                      # Daily summary and plan memory
+│   └── reports/                     # Rendered prompts and run results
+├── .env.example                     # Environment variable template
+├── Makefile                         # Common command entry points
+├── initialization.sh                 # Workspace initialization script
+└── requirements.txt                 # Python dependencies
 ```
 
-本地运行产生的 `.env`、dashboard runtime、workspace 日志/报告/记忆、池子与状态数据，以及个人实验用的 `test/` 目录默认不提交到 GitHub。
+Local `.env`, dashboard runtime files, workspace logs, workspace reports, generated memory, personal test data, and simulated account state should not be treated as portable public artifacts.
 
-## 数据文件
+## Reproducibility
 
-核心结构化文件定义在 `workspace/skills/astra-trade-schema/`。Agent 在写入 `state/`、`pools/`、`logs/`、`reports/` 等结构化数据前应参考该 skill；文件工具会在写入后做格式校验，发现缺字段、JSON/JSONL 解析失败或目标类型不匹配时返回错误，提示模型读取对应 schema 后重试。
+AstraTrade records enough information to replay the reasoning context of a run:
 
-| 文件 | 说明 |
+| Artifact | Reproducibility Role |
 | --- | --- |
-| `workspace/state/account_state.json` | 账户资金、资产、仓位和风控限制 |
-| `workspace/state/market_state.json` | 市场观点、风险等级、热点、关注方向 |
-| `workspace/pools/holdings.jsonl` | 当前持仓 |
-| `workspace/pools/strategies.jsonl` | 策略池 |
-| `workspace/pools/candidates.jsonl` | 候选池 |
-| `workspace/logs/trades.jsonl` | 交易记录 |
-| `workspace/logs/events.jsonl` | 外部事件、子 Agent 触发事件和系统事件 |
-| `workspace/logs/scheduler/` | scheduler 运行日志 |
-| `workspace/logs/agent_runs/{run_id}/` | 单次 Agent 调用的逐步轨迹 |
-| `workspace/logs/agent_runs/{run_id}/run_summary.json` | 单次调用摘要、耗时、工具调用历史和最终结果 |
-| `workspace/logs/agent_runs/{run_id}/agent_trace.json` | 单次调用的完整消息、模型输出、工具结果和耗时轨迹 |
-| `workspace/reports/{run_id}_prompt.md` | 本轮发送给模型的完整 prompt |
-| `workspace/reports/{run_id}_result.json` | 本轮最终结果 |
-| `workspace/skills/astra-trade-schema/` | workspace 结构化数据 schema 与写入参考 |
+| Rendered prompt | Captures the exact system prompt, workspace context, skills, and mode instructions sent to the model. |
+| Final result | Stores the normalized `final` JSON object returned by the loop. |
+| Agent trace | Stores step-level model outputs, tool calls, tool results, parse errors, and timing. |
+| Scheduler logs | Records when fixed jobs, subagents, and alarms were triggered. |
+| Workspace files | Preserve the durable state that future invocations will read. |
 
-## 输出协议
+This is useful for debugging model behavior, comparing model configurations, auditing state transitions, and studying long-horizon agent drift.
 
-主 Agent 最终输出遵循 `system/output_contract.md`，核心结构类似：
+## Design Principles
 
-```json
-{
-  "type": "final",
-  "mode": "scheduler | manual | trigger",
-  "phase": "premarket | intraday | lunch_break | postmarket | non_trading_day | unknown",
-  "summary": "本轮总结",
-  "actions": [],
-  "tool_calls": [],
-  "decisions": [],
-  "file_updates": [],
-  "next_todos": []
-}
-```
+| Principle | Implementation |
+| --- | --- |
+| Explicit memory | The system relies on files, not hidden model state. |
+| Bounded agency | The model can act only through declared tools and protocols. |
+| Schema-first state | Financial state is validated against local schema references. |
+| Human inspectability | Dashboard and run artifacts expose state and execution history. |
+| Eventful recurrence | Long-horizon operation emerges from scheduled, manual, alarm, and trigger invocations. |
+| Separation of concerns | Main agent decides; subagents monitor; tools mutate; dashboard observes and controls. |
 
-循环中间输出只能是 `thinking`、`tool_call` 或 `final` 三种 JSON。若模型输出无法解析或缺少关键字段，Agent Loop 会把协议错误反馈给模型并要求重试。
+## Financial Skills
+
+The workspace includes local skills for financial data access and simulation-oriented operations:
+
+| Skill | Description |
+| --- | --- |
+| `mx-data` | Financial data queries through the configured MX data endpoint. |
+| `mx-search` | Financial news, announcements, research, policy, and event search. |
+| `mx-moni` | Simulation-oriented portfolio or transaction operations. |
+| `stock-ranker` | Candidate ranking support. |
+| `astra-trade-schema` | Schema references for state, pools, logs, and reports. |
+| `astra-trade-alarm` | Natural-language delayed and recurring wake-up tasks. |
+
+The financial skills may call external services when configured with valid credentials. API keys are read from environment variables and should never be committed.
+
+## Limitations and Safety
+
+- This repository is for research, simulation, and system design exploration.
+- Outputs may be incomplete, wrong, stale, or based on unavailable data.
+- The system should not be connected to real-money execution without additional authentication, risk controls, monitoring, and human approval.
+- The LLM must not invent market data, news, financial statements, account state, or tool results.
+- Any real financial decision should be independently verified against authoritative data sources and personal risk constraints.
 
 ## License
 
-本项目目前为私人项目，仅用于个人研究与开发。
+This project is currently private and intended for personal research and development.
 
-保留所有权利。未经许可，禁止复制、分发、修改或用于商业用途。
+All rights reserved. Copying, redistribution, modification, or commercial use is prohibited without permission.
