@@ -17,6 +17,7 @@ ALLOWED_BINARIES = {
     "python",
     "python3",
     "date",
+    "bash",
 }
 
 DANGEROUS_TOKENS = {
@@ -111,7 +112,7 @@ def exec_command(
     command: str,
     project_root: str | Path,
     cwd: str = ".",
-    timeout_seconds: int = 180,
+    timeout_seconds: int = 1800,
 ) -> Dict[str, Any]:
     root = Path(project_root).resolve()
 

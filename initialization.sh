@@ -78,14 +78,14 @@ echo "Initializing account_state.json..."
 cat > "$STATE_DIR/account_state.json" <<EOF
 {
   "mode": "initialization",
-  "cash": 100000,
-  "total_asset": 100000,
+  "cash": 1000000,
+  "total_asset": 1000000,
   "market_value": 0,
-  "available_cash": 100000,
+  "available_cash": 1000000,
   "position_count": 0,
   "risk": {
-    "max_position_ratio": 0.8,
-    "max_single_stock_ratio": 0.2,
+    "max_position_ratio": 1,
+    "max_single_stock_ratio": 0.5,
     "max_daily_trades": 5,
     "stop_trading": false
   },

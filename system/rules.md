@@ -34,8 +34,7 @@
 ## 候选池规则
 
 - `pools/candidates.jsonl` 只保存尚未买入、仍处于观察或待触发状态的候选股票
-- 候选池股票触发买入并完成交易记录后，必须从 `pools/candidates.jsonl` 删除
-- 如果候选股票只是升级为策略但尚未买入，从候选池删除，并在 `pools/strategies.jsonl` 中保留策略
+- 候选池股票触发买入并完成交易记录后，必须从 `pools/candidates.jsonl` 删除，并在 `pools/strategies.jsonl` 中添加策略
 - 涉及买入交易时，必须额外追加 `logs/trades.jsonl`
 
 ## 持仓池规则

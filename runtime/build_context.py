@@ -8,7 +8,8 @@ from typing import Any, Dict, List, Optional
 
 
 VALID_MODES = {"scheduler", "manual", "trigger"}
-
+# TURE_ASSET = 20000
+TURE_ASSET = 1000000
 
 @dataclass
 class RuntimeContext:
@@ -267,6 +268,13 @@ def build_context(
     logs_dir = workspace / "logs"
 
     account_state = read_json_file(state_dir / "account_state.json", default={})
+
+    # 修改为实际总资产
+    account_state["total_asset"] = account_state["total_asset"] - 1000000 + TURE_ASSET
+    account_state["cash"] = account_state["cash"] - 1000000 + TURE_ASSET
+    account_state["available_cash"] = account_state["available_cash"] - 1000000 + TURE_ASSET
+
+
     market_state = read_json_file(state_dir / "market_state.json", default={})
 
     holdings = read_jsonl_file(pools_dir / "holdings.jsonl")

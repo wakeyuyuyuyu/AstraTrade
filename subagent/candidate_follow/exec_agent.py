@@ -277,7 +277,7 @@ def run_candidate_follow(
                 mode="trigger",
                 trigger_reason="candidate_follow_trigger",
                 trigger_event=trigger_event,
-                extra_instructions="本轮由 candidate_follow 子 Agent 触发。请只处理 trigger_event 相关候选股票，先核验触发条件，再决定是否升级为策略、买入或记录观察。",
+                extra_instructions="本轮由 candidate_follow 子 Agent 触发。请只处理 trigger_event 相关候选股票，先核验触发条件，再决定是否执行买入或记录观察。",
                 max_steps=max_steps,
             )
             record["main_agent_result"] = main_result
