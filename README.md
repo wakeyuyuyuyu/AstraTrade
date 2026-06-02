@@ -104,26 +104,11 @@ flowchart LR
 | Subagents | `subagent/` | Watches holdings and candidates, then escalates meaningful events to the main agent. |
 | Dashboard | `dashboard/` | Exposes a local web UI for operation, inspection, and configuration. |
 
-## How It Works
-
-1. A wake-up source starts a run: scheduler, manual task, trigger event, or alarm.
-2. The runtime reads `workspace/` and builds a fresh context snapshot.
-3. The prompt renderer combines core rules, mode instructions, workspace data, and available skills.
-4. The agent loop asks the LLM for structured JSON actions.
-5. Tools read or mutate workspace files under path and schema constraints.
-6. The run writes prompts, results, traces, events, and state updates back to disk.
-7. Future runs continue from the updated workspace.
-
-The result is a recurrent agent that can operate over days without hiding important state inside a chat transcript.
-
 ## Quick Start
 
 ### Requirements
 
 - Python 3.10+
-- macOS, Linux, or WSL
-- An OpenAI-compatible LLM endpoint
-- Optional MX credentials for market data, search, and simulation skills
 
 ### Install
 
@@ -149,6 +134,7 @@ MX_API_URL=https://mkapi2.dfcfs.com/finskillshub
 ```
 
 `SUB_LLM_*` is used by subagents. If a subagent field is empty, AstraTrade falls back to the matching main `LLM_*` value.
+AstraTrade depends on the Miaoxiang Skill provided by the East Money app to fetch market and stock information. Search for Miaoxiang in the East Money app and obtain an API key. The service provides enough free daily calls for typical use.
 
 ### Launch the Dashboard
 
@@ -224,13 +210,11 @@ http://127.0.0.1:8787/
 | `SUB_LLM_API_KEY` | No | API key for subagents. Falls back to `LLM_API_KEY`. |
 | `SUB_LLM_URL` | No | Base URL for subagents. Falls back to `LLM_URL`. |
 | `SUB_LLM_MODEL` | No | Model name for subagents. Falls back to `LLM_MODEL`. |
-| `MX_APIKEY` | Optional | Credential for MX market data, search, and simulation skills. |
-| `MX_API_URL` | Optional | MX service endpoint. |
+| `MX_APIKEY` | Yes | API key for market data, search, and simulation skills. Obtain it through the East Money app. |
+| `MX_API_URL` | Yes | East Money Miaoxiang service endpoint. |
 | `TRADINGAGENTS_TOKEN` | Optional | Token for the optional TradingAgents service. |
 | `TRADINGAGENTS_API_URL` | Optional | URL for the optional TradingAgents service. |
 | `STOCK_AGENT_PYTHON` | Optional | Python executable used by dashboard-launched subprocesses. |
-
-Never commit real API keys or personal account data.
 
 ## Common Commands
 
@@ -327,32 +311,6 @@ AstraTrade/
 └── requirements.txt                # Python dependencies
 ```
 
-Local `.env`, dashboard runtime files, workspace logs, workspace reports, generated memory, personal test data, and simulated account state should not be treated as portable public artifacts.
-
-## Reproducibility
-
-Every main-agent run records artifacts that make the run inspectable:
-
-| Artifact | Role |
-| --- | --- |
-| Rendered prompt | Captures the exact system prompt, workspace context, skills, and mode instructions sent to the model. |
-| Final result | Stores the normalized `final` JSON object returned by the loop. |
-| Agent trace | Stores step-level model outputs, tool calls, tool results, parse errors, and timing. |
-| Scheduler logs | Records when fixed jobs, subagents, diary jobs, and alarms were triggered. |
-| Workspace files | Preserve the durable state that future invocations will read. |
-
-This makes it easier to debug model behavior, compare model configurations, inspect state transitions, and audit long-horizon drift.
-
-## Safety
-
-- AstraTrade is for research, simulation, and workflow experimentation.
-- It does not place real trades and should not be connected to broker execution without separate authentication, risk controls, monitoring, and human approval.
-- LLM outputs may be incomplete, stale, or wrong.
-- The agent must not invent market data, news, financial statements, account state, or tool results.
-- Any real financial decision should be independently verified against authoritative data sources and personal risk constraints.
-
 ## License
 
-This project is currently private and intended for personal research and development.
-
-All rights reserved. Copying, redistribution, modification, sublicensing, or commercial use is prohibited without prior written permission.
+This project is open source under the MIT License. See the LICENSE file for details.

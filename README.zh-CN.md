@@ -104,26 +104,12 @@ flowchart LR
 | Subagents | `subagent/` | 监控持仓和候选池，并将有意义的事件升级给主 Agent。 |
 | Dashboard | `dashboard/` | 提供本地 Web UI，用于操作、检查和配置。 |
 
-## 工作流程
-
-1. Scheduler、人工任务、Trigger 事件或 Alarm 唤醒一次运行。
-2. Runtime 读取 `workspace/`，构建新的上下文快照。
-3. Prompt renderer 合并核心规则、模式说明、workspace 数据和可用 skills。
-4. Agent loop 要求 LLM 输出结构化 JSON 动作。
-5. Tools 在路径和 schema 约束下读取或修改 workspace 文件。
-6. 本次运行将 prompt、结果、trace、事件和状态更新写回磁盘。
-7. 下一次运行从更新后的 workspace 继续。
-
-这让 agent 能够在多天跨度里递归工作，同时不把关键状态隐藏在单次对话里。
 
 ## 快速开始
 
 ### 环境要求
 
 - Python 3.10+
-- macOS、Linux 或 WSL
-- OpenAI-compatible LLM endpoint
-- 可选：用于行情、搜索和模拟操作的 MX credentials
 
 ### 安装
 
@@ -149,6 +135,7 @@ MX_API_URL=https://mkapi2.dfcfs.com/finskillshub
 ```
 
 `SUB_LLM_*` 供子 Agent 使用。若某一项为空，AstraTrade 会逐项回退到主 Agent 对应的 `LLM_*` 配置。
+本项目依赖东方财富APP提供的妙想Skill获取市场、股票等信息，需要在东方财富APP搜索妙想并获取API-KEY(每天有足够的免费调用次数)。
 
 ### 启动 Dashboard
 
@@ -224,13 +211,11 @@ http://127.0.0.1:8787/
 | `SUB_LLM_API_KEY` | 否 | 子 Agent API key，未配置时回退到 `LLM_API_KEY`。 |
 | `SUB_LLM_URL` | 否 | 子 Agent endpoint，未配置时回退到 `LLM_URL`。 |
 | `SUB_LLM_MODEL` | 否 | 子 Agent 模型名称，未配置时回退到 `LLM_MODEL`。 |
-| `MX_APIKEY` | 可选 | MX 行情、搜索和模拟操作 skills 的凭据。 |
-| `MX_API_URL` | 可选 | MX 服务 endpoint。 |
+| `MX_APIKEY` | 是 | 行情、搜索和模拟操作 skills 的API key，通过东方财富APP获取。 |
+| `MX_API_URL` | 是 | 东方财富妙想服务 endpoint。 |
 | `TRADINGAGENTS_TOKEN` | 可选 | 可选 TradingAgents 服务 token。 |
 | `TRADINGAGENTS_API_URL` | 可选 | 可选 TradingAgents 服务 URL。 |
 | `STOCK_AGENT_PYTHON` | 可选 | Dashboard 启动 agent 子进程时使用的 Python 路径。 |
-
-不要提交真实 API key 或个人账户数据。
 
 ## 常用命令
 
@@ -327,32 +312,6 @@ AstraTrade/
 └── requirements.txt                # Python 依赖
 ```
 
-本地 `.env`、Dashboard runtime 文件、workspace 日志、workspace 报告、生成的 memory、个人测试数据和模拟账户状态不应被视为可公开迁移的 artifacts。
+## 许可证
 
-## 可复现性
-
-每次主 Agent 运行都会保存可检查的 artifacts：
-
-| Artifact | 作用 |
-| --- | --- |
-| 渲染 prompt | 捕获实际发送给模型的系统提示、workspace 上下文、skills 和模式说明。 |
-| 最终结果 | 保存 Agent loop 返回的规范化 `final` JSON 对象。 |
-| Agent trace | 保存步骤级模型输出、工具调用、工具结果、解析错误和耗时。 |
-| Scheduler 日志 | 记录固定任务、子 Agent、日记任务和 Alarm 的触发时间。 |
-| Workspace 文件 | 保存未来调用会继续读取的持久状态。 |
-
-这些 artifacts 方便调试模型行为、比较模型配置、检查状态转移，并审计长周期 agent 的漂移。
-
-## 安全说明
-
-- AstraTrade 用于研究、模拟和工作流实验。
-- 它不会执行真实交易；在缺少独立认证、风控、监控和人工批准前，不应接入券商执行。
-- LLM 输出可能不完整、过时或错误。
-- Agent 不应编造行情、新闻、财务报表、账户状态或工具结果。
-- 任何真实金融决策都应基于权威数据源和个人风险约束独立核验。
-
-## License
-
-本项目目前为私人项目，仅用于个人研究与开发。
-
-保留所有权利。未经书面许可，禁止复制、分发、修改、再授权或用于商业用途。
+本项目基于 MIT 许可证开源，详情请参见 LICENSE 文件。
