@@ -24,7 +24,7 @@
     <a href="#可复现性">可复现性</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/Python-3.10%2B-blue?logo=python" alt="Python 3.10+">
+    <img src="https://img.shields.io/badge/Python-3.11-blue?logo=python" alt="Python 3.11">
     <img src="https://img.shields.io/badge/Agent-Long--Horizon-7c3aed" alt="Long-Horizon Agent">
     <img src="https://img.shields.io/badge/Workspace-Persistent%20Memory-64a8ff" alt="Persistent Workspace">
     <img src="https://img.shields.io/badge/Dashboard-Local%20Web-20d0a2" alt="Local Dashboard">
@@ -109,7 +109,7 @@ flowchart LR
 
 ### 环境要求
 
-- Python 3.10+
+- Python 3.11.x
 
 ### 安装
 
@@ -117,6 +117,12 @@ flowchart LR
 git clone https://github.com/BryanGao-1216/AstraTrade.git
 cd AstraTrade
 make setup
+```
+
+`make setup` 会先查找 Python 3.11；如果本机没有，会尝试通过 `uv`、Homebrew、常见 Linux 包管理器或 `pyenv` 安装，然后用 Python 3.11 创建 `.venv`。如果已有 `.venv` 不是 Python 3.11，setup 会重建它。如果你要指定解释器，可以运行：
+
+```bash
+make setup PYTHON=/absolute/path/to/python3.11
 ```
 
 编辑 `.env`：
@@ -171,7 +177,7 @@ Scheduler 会根据 `config/scheduler.json` 运行市场阶段任务、子 Agent
 git clone https://github.com/BryanGao-1216/AstraTrade.git
 cd AstraTrade
 
-py -3 -m venv .venv
+py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\pip.exe install -r requirements.txt
 
@@ -221,7 +227,7 @@ http://127.0.0.1:8787/
 
 | 命令 | 说明 |
 | --- | --- |
-| `make setup` | 创建 `.venv`、安装依赖、复制 `.env`、初始化 workspace 并生成 `STYLE.md`。 |
+| `make setup` | 确保 Python 3.11、创建 `.venv`、安装依赖、复制 `.env`、初始化 workspace 并生成 `STYLE.md`。 |
 | `make dashboard` | 在 `PORT` 上启动本地 Dashboard，默认端口为 `8787`。 |
 | `make init` | 重新初始化 workspace 状态、池子、日志、记忆、报告和 Alarm 配置。 |
 | `make run` | 以 `scheduler` 模式执行一次主 Agent。 |
@@ -234,9 +240,9 @@ http://127.0.0.1:8787/
 直接运行 runtime：
 
 ```bash
-python -m runtime.launcher --mode scheduler
-python -m runtime.launcher --task "分析 300059 是否值得加入候选池。"
-python -m runtime.agent
+.venv/bin/python -m runtime.launcher --mode scheduler
+.venv/bin/python -m runtime.launcher --task "分析 300059 是否值得加入候选池。"
+.venv/bin/python -m runtime.agent
 ```
 
 Trigger 模式示例：

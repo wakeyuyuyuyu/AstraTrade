@@ -114,3 +114,10 @@ def call_llm(
         raise RuntimeError("模型返回内容为空")
 
     return content
+
+if __name__ == "__main__":
+    test_messages = [
+        {"role": "user", "content": "你好"}
+    ]
+    result = call_llm(test_messages)
+    print(result)

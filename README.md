@@ -24,7 +24,7 @@
     <a href="#reproducibility">Reproducibility</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/Python-3.10%2B-blue?logo=python" alt="Python 3.10+">
+    <img src="https://img.shields.io/badge/Python-3.11-blue?logo=python" alt="Python 3.11">
     <img src="https://img.shields.io/badge/Agent-Long--Horizon-7c3aed" alt="Long-Horizon Agent">
     <img src="https://img.shields.io/badge/Workspace-Persistent%20Memory-64a8ff" alt="Persistent Workspace">
     <img src="https://img.shields.io/badge/Dashboard-Local%20Web-20d0a2" alt="Local Dashboard">
@@ -108,7 +108,7 @@ flowchart LR
 
 ### Requirements
 
-- Python 3.10+
+- Python 3.11.x
 
 ### Install
 
@@ -116,6 +116,12 @@ flowchart LR
 git clone https://github.com/BryanGao-1216/AstraTrade.git
 cd AstraTrade
 make setup
+```
+
+`make setup` looks for Python 3.11 first. If it is missing, the setup script attempts to install it with `uv`, Homebrew, common Linux package managers, or `pyenv`, then creates `.venv` with that interpreter. If an existing `.venv` was created with another Python version, setup recreates it. To use a specific interpreter, run:
+
+```bash
+make setup PYTHON=/absolute/path/to/python3.11
 ```
 
 Edit `.env`:
@@ -170,7 +176,7 @@ For Windows PowerShell or environments without `make`, run the setup commands ma
 git clone https://github.com/BryanGao-1216/AstraTrade.git
 cd AstraTrade
 
-py -3 -m venv .venv
+py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\pip.exe install -r requirements.txt
 
@@ -220,7 +226,7 @@ http://127.0.0.1:8787/
 
 | Command | Description |
 | --- | --- |
-| `make setup` | Create `.venv`, install dependencies, copy `.env`, initialize workspace, and generate `STYLE.md`. |
+| `make setup` | Ensure Python 3.11, create `.venv`, install dependencies, copy `.env`, initialize workspace, and generate `STYLE.md`. |
 | `make dashboard` | Start the local dashboard on `PORT`, defaulting to `8787`. |
 | `make init` | Reinitialize workspace state, pools, logs, memory, reports, and alarm config. |
 | `make run` | Execute one main-agent run in `scheduler` mode. |
@@ -233,9 +239,9 @@ http://127.0.0.1:8787/
 Direct runtime usage:
 
 ```bash
-python -m runtime.launcher --mode scheduler
-python -m runtime.launcher --task "Analyze whether 300059 should enter the candidate pool."
-python -m runtime.agent
+.venv/bin/python -m runtime.launcher --mode scheduler
+.venv/bin/python -m runtime.launcher --task "Analyze whether 300059 should enter the candidate pool."
+.venv/bin/python -m runtime.agent
 ```
 
 Trigger-mode example:
