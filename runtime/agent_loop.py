@@ -412,7 +412,15 @@ def run_agent_loop(
                 },
             )
 
-        response_text = call_llm(messages, "main")
+        try:
+            response_text = call_llm(messages, "main")
+        except RuntimeError as e:
+            response_text = json.dumps({
+                "type": "error",
+                "error_type": "llm_call_failed",
+                "error": str(e),
+                "raw_output": "",
+            })
         
         parsed = parse_model_output(response_text)
         format_valid, format_error = assess_model_output_format(parsed)

@@ -108,6 +108,16 @@ def resolve_cwd(project_root: Path, cwd: str) -> Path:
     return path
 
 
+def _resolve_python(project_root: Path) -> Path | None:
+    venv_python = project_root / ".venv" / "Scripts" / "python.exe"
+    if venv_python.exists():
+        return venv_python
+    venv_python = project_root / ".venv" / "bin" / "python"
+    if venv_python.exists():
+        return venv_python
+    return None
+
+
 def exec_command(
     command: str,
     project_root: str | Path,
@@ -144,6 +154,10 @@ def exec_command(
             "stderr": reason,
             "exit_code": -1,
         }
+
+    venv_python = _resolve_python(root)
+    if parts and parts[0] in {"python", "python3"} and venv_python:
+        parts[0] = str(venv_python)
 
     try:
         actual_cwd = resolve_cwd(root, cwd)

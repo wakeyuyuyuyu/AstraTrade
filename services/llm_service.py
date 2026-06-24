@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import re
+from datetime import datetime
+from pathlib import Path
 from typing import List, Dict, Optional
 
 from openai import OpenAI
@@ -99,19 +101,35 @@ def call_llm(
         temperature=temperature,
     )
 
-    content = response.choices[0].message.content or ""
+    max_retries = 3
+    for attempt in range(max_retries):
+        raw_content = response.choices[0].message.content or ""
 
-    think_content = extract_think_content(content)
-    # 如果以后想保存 think，可以在这里返回或记录到日志
-    # if think_content:
-    #     print("\n========== MODEL THINK ==========")
-    #     print(think_content)
-    #     print("========== END THINK ==========\n")
+        think_content = extract_think_content(raw_content)
+        content = extract_final_content(raw_content)
 
-    content = extract_final_content(content)
+        if content or think_content:
+            break
 
-    if not content:
-        raise RuntimeError("模型返回内容为空")
+        if attempt < max_retries - 1:
+            import time
+            time.sleep(2)
+            response = client.chat.completions.create(
+                model=config["model"],
+                messages=messages,
+                temperature=temperature,
+            )
+        else:
+            choice = response.choices[0]
+            debug_path = Path(__file__).resolve().parents[1] / "debug_llm.log"
+            with open(debug_path, "a", encoding="utf-8") as f:
+                f.write(f"[{datetime.now()}] finish_reason={choice.finish_reason}\n")
+                f.write(f"Raw content: {raw_content!r}\n")
+                f.write(f"---\n")
+            raise RuntimeError("模型返回内容为空")
+
+    if not content and think_content:
+        content = think_content
 
     return content
 
