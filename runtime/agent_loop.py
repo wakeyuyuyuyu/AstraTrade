@@ -362,7 +362,7 @@ def run_agent_loop(
     project_root: str | Path,
     max_steps: int = 10,
     max_consecutive_thinking: int = 2,
-    max_error_retries: int = 3,
+    max_error_retries: int = 8,
     run_log_dir: str | Path | None = None,
 ) -> Dict[str, Any]:
     run_log_path = Path(run_log_dir).resolve() if run_log_dir else None

@@ -43,13 +43,6 @@ workspace 是你的唯一外部记忆。
 
 ## 格式要求
 
-所有结构化文件写入前，必须使用 `astra-trade-schema` skill 确认目标文件格式。
-同一轮中再次写入同类文件时，如果已读取对应 reference，可复用该 schema 信息。
+写入结构化文件时，必须确认目标文件格式。相关 Schema 参考已包含在本轮运行上下文中，无需额外读取 `skills/astra-trade-schema/` 文件。
 
-执行写入前必须按顺序完成：
-
-1. 读取 `skills/astra-trade-schema/SKILL.md`
-2. 根据 SKILL.md 的指引，读取目标文件对应的 reference
-3. 再执行 `write`、`edit`、`add` 或 `write_memory`
-
-不得跳过 schema skill 直接写入结构化文件。
+如果上下文中的 Schema 信息不足以确认格式，可读取对应的 reference 文件进行补充验证。
