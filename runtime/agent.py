@@ -295,6 +295,60 @@ def run_market_subagents(now: datetime, cfg: dict) -> None:
         run_command(name, command)
 
 
+def run_market_subagents(now: datetime, cfg: dict) -> None:
+    subagents = [
+        subagent
+        for subagent in cfg.get("market_subagents", [])
+        if not str(subagent.get("time", "")).strip()
+    ]
+
+    if not subagents:
+        write_log("MARKET_TRIGGER matched but no market_subagents configured")
+        return
+
+    write_log(
+        f"MARKET_TRIGGER matched time={now.strftime('%Y-%m-%d %H:%M')} subagents={len(subagents)}"
+    )
+
+    for subagent in subagents:
+        if not subagent.get("enabled", True):
+            continue
+
+        name = subagent.get("name", "unknown_subagent")
+        command = subagent.get("command", "").strip()
+
+        if not command:
+            write_log(f"SKIP subagent={name} reason=empty_command")
+            continue
+
+        run_command(name, command)
+
+
+def run_market_scan(now: datetime, cfg: dict) -> None:
+    """盘中扫描：调用 main_agent 执行全市场分析+候选股巡检。"""
+    base_command = cfg.get("main_agent_command", "python -m runtime.launcher")
+    trigger_reason = detect_trigger_reason(now)
+    extra_instructions = (
+        "本轮为盘中定时扫描。请执行以下操作：\n"
+        "1. 读取 candidates.jsonl，查询所有候选股的最新行情\n"
+        "2. 判断是否有候选股触发买入条件\n"
+        "3. 读取 holdings.jsonl（如有持仓），检查止损止盈条件\n"
+        "4. 更新 market_state.json 中的市场状态\n"
+        "5. 记录分析和判断结果"
+    )
+    command = build_main_agent_command(
+        base_command=base_command,
+        trigger_reason=trigger_reason,
+        extra_instructions=extra_instructions,
+    )
+    write_log(
+        f"MARKET_SCAN triggered time={now.strftime('%Y-%m-%d %H:%M')} "
+        f"reason={trigger_reason}"
+    )
+    run_command("market_scan", command)
+
+
+
 def get_due_timed_subagents(now: datetime, cfg: dict) -> list[dict]:
     cur_hm = now.strftime("%H:%M")
 
@@ -511,11 +565,11 @@ def main() -> None:
                     run_timed_subagent(now, subagent)
 
             if in_market_schedule(now, cfg):
-                key = f"market_subagents:{minute_key}"
+                key = f"market_scan:{minute_key}"
 
                 if key not in last_run_keys:
                     last_run_keys.add(key)
-                    run_market_subagents(now, cfg)
+                    run_market_scan(now, cfg)
 
             today_prefix = now.strftime("%Y-%m-%d")
             last_run_keys = {k for k in last_run_keys if today_prefix in k}

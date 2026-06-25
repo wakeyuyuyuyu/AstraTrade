@@ -80,6 +80,8 @@ const pageMeta = {
   style: { eyebrow: "Style", title: "投资风格配置" },
   api: { eyebrow: "API", title: "API 配置" },
   "scheduler-config": { eyebrow: "Scheduler", title: "自动触发配置" },
+  scout: { eyebrow: "Stock Scout", title: "选股推荐" },
+  logs: { eyebrow: "Runtime Logs", title: "运行日志" },
 };
 
 function cloneData(value) {
@@ -334,11 +336,12 @@ function accountStatus(account, holdings) {
     };
   }
 
+  // 数据过期时不显示"待同步"，改为显示具体时间，让用户明确知道上次刷新时刻
   if (isStale(updatedAt, 90)) {
     return {
-      label: "待同步",
+      label: `上次同步 ${formatParsedDateTime(updatedAt)}`,
       className: "running",
-      title: "账户或持仓超过 90 分钟未同步",
+      title: `账户或持仓超过 90 分钟未同步（${formatParsedDateTime(updatedAt)}）`,
     };
   }
 
@@ -356,9 +359,9 @@ function marketStatus(market) {
 
   if (isStale(updatedAt, 240)) {
     return {
-      label: "市场待刷新",
+      label: `上次更新 ${formatParsedDateTime(updatedAt)}`,
       className: "running",
-      title: "市场状态超过 4 小时未更新",
+      title: `市场状态超过 4 小时未更新（${formatParsedDateTime(updatedAt)}）`,
     };
   }
 
@@ -1283,6 +1286,28 @@ function renderSchedulerConfig(configPayload, force = false) {
   renderSchedulerRows("marketSubagentsEditor", "subagent", Array.isArray(config.market_subagents) ? config.market_subagents : []);
 
   state.schedulerConfigRendered = true;
+
+  loadMxQuota();
+  bindMxQuotaLiveEvents();
+}
+
+function loadMxQuota() {
+  fetch("/api/mx-quota", { cache: "no-store" })
+    .then(r => r.json())
+    .then(data => renderMxQuota(data))
+    .catch(() => {
+      const panel = $("mxQuotaPanel");
+      if (panel) panel.innerHTML = '<div class="mx-quota-loading">加载失败</div>';
+    });
+}
+
+function bindMxQuotaLiveEvents() {
+  const editor = $("marketSessionsEditor");
+  if (!editor) return;
+  editor.addEventListener("input", (e) => {
+    const input = e.target.closest("[data-field='interval_minutes'], [data-field='start'], [data-field='end']");
+    if (input) updateMxQuotaLive();
+  });
 }
 
 function collectSchedulerRows(containerId) {
@@ -1422,6 +1447,121 @@ function handleSchedulerEditorClick(event) {
     list.appendChild(empty);
   }
 }
+
+function renderMxQuota(data) {
+  const panel = $("mxQuotaPanel");
+  if (!panel) return;
+  if (!data) {
+    panel.innerHTML = '<div class="mx-quota-loading">暂无数据</div>';
+    return;
+  }
+  const cand = data.candidate_count ?? 0;
+  const runs = data.runs_per_day ?? 0;
+  const total = data.total_daily_calls ?? 0;
+  const promoOk = data.promo_sufficient;
+  const normalOk = data.normal_sufficient;
+  const promoRemain = data.promo_remaining ?? 0;
+  const normalRemain = data.normal_remaining ?? 0;
+
+  panel.innerHTML = `
+    <div class="mx-quota-grid">
+      <div class="mx-quota-card label">
+        <h4>候选池</h4>
+        <div class="value">${cand} <span class="unit">只股票</span></div>
+        <div class="sub">每轮巡检消耗 ${cand} 次 mx-data 调用</div>
+      </div>
+      <div class="mx-quota-card label">
+        <h4>巡检频率</h4>
+        <div class="value">${runs} <span class="unit">次/天</span></div>
+        <div class="sub">基于当前交易时段配置</div>
+      </div>
+      <div class="mx-quota-card calls">
+        <h4>每日预估消耗</h4>
+        <div class="value">${total} <span class="unit">次/天</span></div>
+        <div class="sub">${runs} 次巡检 × ${cand} 只股票</div>
+      </div>
+      <div class="mx-quota-card promo">
+        <h4>活动期配额 (150次/天)</h4>
+        <div class="value">${promoOk ? "✅" : "❌"} <span class="unit">${promoOk ? "够用" : "不够"}</span></div>
+        <div class="sub">剩余额度约 ${promoRemain} 次/天</div>
+        <span class="status-tag ${promoOk ? "ok" : "fail"}">${promoOk ? "充足" : "超限"}</span>
+      </div>
+      <div class="mx-quota-card normal" style="grid-column: 1 / -1;">
+        <h4>正常期配额 (50次/天)</h4>
+        <div class="value">${normalOk ? "✅" : "❌"} <span class="unit">${normalOk ? "够用" : "不够"}</span></div>
+        <div class="sub">剩余额度约 ${normalRemain} 次/天</div>
+        <span class="status-tag ${normalOk ? "ok" : "fail"}">${normalOk ? "充足" : "超限"}</span>
+      </div>
+    </div>
+  `;
+}
+
+function updateMxQuotaLive() {
+  const panel = $("mxQuotaPanel");
+  if (!panel) return;
+  const sessionRows = document.querySelectorAll("#marketSessionsEditor .scheduler-config-row");
+  let runsPerDay = 0;
+  sessionRows.forEach(row => {
+    const startInput = row.querySelector("[data-field='start']");
+    const endInput = row.querySelector("[data-field='end']");
+    const intervalInput = row.querySelector("[data-field='interval_minutes']");
+    if (!startInput || !endInput || !intervalInput) return;
+    const start = String(startInput.value || "09:30");
+    const end = String(endInput.value || "11:30");
+    const interval = Number(intervalInput.value) || 10;
+    const parseMin = (t) => { try { const [h,m]=t.trim().split(":").map(Number); return h*60+m; } catch { return 0; } };
+    const s = parseMin(start);
+    const e = parseMin(end);
+    if (e > s && interval > 0) {
+      runsPerDay += Math.floor((e - s) / interval);
+    }
+  });
+  const candInput = document.querySelector("#candidatesCount");
+  let candCount = 0;
+  if (candInput) {
+    const text = candInput.textContent || "";
+    const m = text.match(/(\d+)/);
+    if (m) candCount = parseInt(m[1]);
+  }
+  const total = runsPerDay * candCount;
+  const promo = 150;
+  const normal = 50;
+  const promoOk = total <= promo;
+  const normalOk = total <= normal;
+  panel.innerHTML = `
+    <div class="mx-quota-grid">
+      <div class="mx-quota-card label">
+        <h4>候选池</h4>
+        <div class="value">${candCount} <span class="unit">只股票</span></div>
+        <div class="sub">每轮巡检消耗 ${candCount} 次 mx-data 调用</div>
+      </div>
+      <div class="mx-quota-card label">
+        <h4>巡检频率</h4>
+        <div class="value">${runsPerDay} <span class="unit">次/天</span></div>
+        <div class="sub">基于当前填写值计算</div>
+      </div>
+      <div class="mx-quota-card calls">
+        <h4>每日预估消耗</h4>
+        <div class="value">${total} <span class="unit">次/天</span></div>
+        <div class="sub">${runsPerDay} 次巡检 × ${candCount} 只股票</div>
+      </div>
+      <div class="mx-quota-card promo">
+        <h4>活动期配额 (150次/天)</h4>
+        <div class="value">${promoOk ? "✅" : "❌"} <span class="unit">${promoOk ? "够用" : "不够"}</span></div>
+        <div class="sub">${promoOk ? "剩余约 " + (promo - total) + " 次/天" : "超出 " + (total - promo) + " 次/天"}</div>
+        <span class="status-tag ${promoOk ? "ok" : "fail"}">${promoOk ? "充足" : "超限"}</span>
+      </div>
+      <div class="mx-quota-card normal" style="grid-column: 1 / -1;">
+        <h4>正常期配额 (50次/天)</h4>
+        <div class="value">${normalOk ? "✅" : "❌"} <span class="unit">${normalOk ? "够用" : "不够"}</span></div>
+        <div class="sub">${normalOk ? "剩余约 " + (normal - total) + " 次/天" : "超出 " + (total - normal) + " 次/天"}</div>
+        <span class="status-tag ${normalOk ? "ok" : "fail"}">${normalOk ? "充足" : "超限"}</span>
+      </div>
+    </div>
+    <div class="mx-quota-live-hint">修改间隔分钟后自动重新计算</div>
+  `;
+}
+
 
 function latestInitializationDate(data) {
   const initialization = data.initialization || {};
@@ -1610,6 +1750,28 @@ function renderAlarm(alarm) {
     item.appendChild(body);
     list.appendChild(item);
   });
+}
+
+async function runStockScout() {
+  const btn = $("runScoutBtn");
+  const msg = $("scoutMessage");
+  if (!btn) return;
+  btn.disabled = true;
+  if (msg) { msg.textContent = "选股中，请等待..."; msg.className = "inline-message"; }
+  try {
+    const response = await fetch("/api/stock-scout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "选股失败");
+    if (msg) { msg.textContent = `已启动选股 (${data.id})`; msg.className = "inline-message ok"; }
+  } catch (error) {
+    if (msg) { msg.textContent = error.message; msg.className = "inline-message error"; }
+  } finally {
+    btn.disabled = false;
+    setTimeout(() => refresh(), 2000);
+  }
 }
 
 async function runManual() {
@@ -2324,6 +2486,234 @@ function ensureTraceSelection() {
   }
 }
 
+let logsCache = null;
+
+function renderLogsSummary(summary) {
+  const container = $("logsSummary");
+  if (!container) return;
+  clearNode(container);
+
+  if (!summary) return;
+
+  const cards = [
+    { label: "总运行次数", value: summary.total_runs, cls: "stat-neutral" },
+    { label: "成功", value: summary.success_count, cls: "stat-ok" },
+    { label: "失败", value: summary.failure_count, cls: "stat-fail" },
+    { label: "模型调用", value: summary.total_model_calls, cls: "stat-neutral" },
+    { label: "工具调用", value: summary.total_tool_calls, cls: "stat-neutral" },
+    { label: "协议错误", value: summary.total_errors, cls: "stat-fail" },
+    { label: "平均耗时", value: `${summary.avg_duration_seconds}s`, cls: "stat-neutral" },
+  ];
+
+  cards.forEach((card) => {
+    const div = document.createElement("div");
+    div.className = "logs-stat-card";
+    const label = document.createElement("span");
+    label.textContent = card.label;
+    const value = document.createElement("strong");
+    value.className = card.cls;
+    value.textContent = card.value ?? "--";
+    div.appendChild(label);
+    div.appendChild(value);
+    container.appendChild(div);
+  });
+}
+
+function statusTag(run) {
+  if (run.success === true) return "成功";
+  if (run.success === false) return "失败";
+  return "进行中";
+}
+
+function statusClass(run) {
+  if (run.success === true) return "success";
+  if (run.success === false) return "failed";
+  return "incomplete";
+}
+
+function durationLabel(seconds) {
+  if (seconds === undefined || seconds === null) return "--";
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.floor(seconds / 60);
+  const s = Math.round(seconds % 60);
+  return `${m}m${s}s`;
+}
+
+function renderRunCard(run) {
+  const card = document.createElement("div");
+  card.className = `logs-run-card ${statusClass(run)}`;
+
+  const head = document.createElement("div");
+  head.className = "logs-run-card-head";
+  const title = document.createElement("strong");
+  title.textContent = run.run_id || "--";
+  const tag = document.createElement("span");
+  tag.className = `tag ${tagClass(run.success)}`;
+  tag.textContent = statusTag(run);
+  head.appendChild(title);
+  head.appendChild(tag);
+
+  const body = document.createElement("div");
+  body.className = "logs-run-card-body";
+  const fields = [
+    `模式: ${run.mode || "--"}`,
+    `阶段: ${run.phase || "--"}`,
+    `步骤: ${run.steps || 0}`,
+    `工具: ${run.tool_call_count || 0}`,
+    `思考: ${run.thinking_count || 0}`,
+    `错误: ${run.error_count || 0}`,
+    `耗时: ${durationLabel(run.duration_seconds)}`,
+    `开始: ${run.started_at || "--"}`,
+  ];
+  fields.forEach((f) => {
+    const span = document.createElement("span");
+    span.textContent = f;
+    body.appendChild(span);
+  });
+
+  const summary = document.createElement("div");
+  summary.className = "logs-run-card-summary";
+  summary.textContent = run.summary || "暂无摘要";
+
+  const detail = document.createElement("div");
+  detail.className = "logs-run-card-detail";
+  if (run.thinking_count > 0) {
+    const chip = document.createElement("span");
+    chip.className = "chip thinking";
+    chip.textContent = `思考 ×${run.thinking_count}`;
+    detail.appendChild(chip);
+  }
+  if (run.tool_call_count > 0) {
+    const chip = document.createElement("span");
+    chip.className = "chip tool_call";
+    chip.textContent = `工具 ×${run.tool_call_count}`;
+    detail.appendChild(chip);
+  }
+  if (run.error_count > 0) {
+    const chip = document.createElement("span");
+    chip.className = "chip error";
+    chip.textContent = `错误 ×${run.error_count}`;
+    detail.appendChild(chip);
+  }
+
+  card.appendChild(head);
+  card.appendChild(body);
+  card.appendChild(summary);
+  if (detail.childElementCount) card.appendChild(detail);
+
+  card.style.cursor = "pointer";
+  card.title = "点击查看轨迹";
+  card.addEventListener("click", () => {
+    if (window.openTrace && run.run_id) {
+      window.openTrace(run.run_id);
+    }
+  });
+
+  return card;
+}
+
+function renderLogs(data) {
+  if (!data) return;
+  logsCache = data;
+  text("logsTotalBadge", `${data.summary?.total_runs || 0} 次`);
+  renderLogsSummary(data.summary);
+  const list = $("logsRunList");
+  if (!list) return;
+  clearNode(list);
+
+  const runs = data.runs || [];
+  if (!runs.length) {
+    const empty = document.createElement("div");
+    empty.className = "logs-empty";
+    empty.textContent = "暂无运行记录";
+    list.appendChild(empty);
+    return;
+  }
+
+  runs.forEach((run) => list.appendChild(renderRunCard(run)));
+}
+
+async function loadScoutRecommendations() {
+  try {
+    const response = await fetch("/api/scout-recommendations", { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    renderScoutRecommendations(data);
+  } catch (error) {
+    console.error("Failed to load scout recommendations:", error);
+    const list = $("scoutRecommendations");
+    if (list) list.innerHTML = '<div class="scout-loading">加载失败</div>';
+  }
+}
+
+function renderScoutRecommendations(data) {
+  const list = $("scoutRecommendations");
+  const badge = $("scoutBadge");
+  const count = $("scoutCount");
+  if (!list) return;
+  const recs = data.recommendations || [];
+  const pending = recs.filter(r => r.status === "pending");
+  text("scoutCount", `${pending.length} 条待确认`);
+  if (badge) {
+    badge.textContent = pending.length;
+    badge.style.display = pending.length > 0 ? "inline" : "none";
+  }
+  if (!recs.length) {
+    list.innerHTML = '<div class="scout-empty">暂无选股推荐。点击主控制台的 🔍 自动选股 按钮生成推荐。</div>';
+    return;
+  }
+  list.innerHTML = recs.map(rec => {
+    const status = rec.status || "pending";
+    const statusLabel = { pending: "待确认", accepted: "已采纳", rejected: "已忽略" }[status] || status;
+    const reason = rec.reason || "暂无详细理由";
+    const time = rec.recommended_at || "--";
+    const actions = status === "pending" ? `
+      <div class="scout-card-actions">
+        <button class="accept-btn" data-rec-id="${rec.id}" data-action="accept-scout">✓ 采纳</button>
+        <button class="reject-btn" data-rec-id="${rec.id}" data-action="reject-scout">✕ 忽略</button>
+      </div>
+    ` : "";
+    return `
+      <div class="scout-card" data-rec-id="${rec.id}">
+        <div class="scout-card-head">
+          <div class="scout-card-head-left">
+            <strong>${rec.symbol}</strong>
+            <span>${rec.name}</span>
+            <span class="tag status-tag ${status}">${statusLabel}</span>
+          </div>
+        </div>
+        <div class="scout-card-reason">${escapeHtml(reason)}</div>
+        <div class="scout-card-meta">
+          <span>推荐时间: ${time}</span>
+          ${actions}
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+async function handleScoutAction(recId, action) {
+  const endpoint = action === "accept" ? "/api/scout-recommendations/accept" : "/api/scout-recommendations/reject";
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: recId }),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    await loadScoutRecommendations();
+  } catch (error) {
+    console.error(`Failed to ${action} recommendation:`, error);
+  }
+}
+
+function escapeHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+
 function render(data) {
   state.snapshot = data;
   text("lastUpdated", `更新 ${data.updated_at || "--"}`);
@@ -2376,27 +2766,63 @@ async function refresh() {
   }
 }
 
+// 安全绑定：元素不存在时不崩溃（上一个版本因 runScoutBtn 未空检查导致整个 bindEvents 中断，所有导航按钮失效）
+function safeBind(id, fn) {
+  const el = $(id);
+  if (el) el.addEventListener("click", fn);
+}
+
 function bindEvents() {
-  $("refreshBtn").addEventListener("click", () => refresh());
-  $("saveStyleBtn").addEventListener("click", () => saveStyle());
-  $("saveApiBtn").addEventListener("click", () => saveApiConfig());
-  $("saveSchedulerConfigBtn").addEventListener("click", () => saveSchedulerConfig());
-  $("addFixedJobBtn").addEventListener("click", () => addFixedJob());
-  $("addMarketSessionBtn").addEventListener("click", () => addMarketSession());
-  $("fixedJobsEditor").addEventListener("click", handleSchedulerEditorClick);
-  $("marketSessionsEditor").addEventListener("click", handleSchedulerEditorClick);
-  $("runManualBtn").addEventListener("click", () => runManual());
-  $("startSchedulerBtn").addEventListener("click", () => startScheduler());
-  $("stopSchedulerBtn").addEventListener("click", () => stopScheduler());
-  $("initializeBtn").addEventListener("click", () => initializeWorkspace());
+  safeBind("refreshBtn", () => refresh());
+  safeBind("saveStyleBtn", () => saveStyle());
+  safeBind("saveApiBtn", () => saveApiConfig());
+  safeBind("saveSchedulerConfigBtn", () => saveSchedulerConfig());
+  safeBind("addFixedJobBtn", () => addFixedJob());
+  safeBind("addMarketSessionBtn", () => addMarketSession());
+  safeBind("fixedJobsEditor", handleSchedulerEditorClick);
+  safeBind("marketSessionsEditor", handleSchedulerEditorClick);
+  safeBind("refreshQuotaBtn", () => { loadMxQuota(); updateMxQuotaLive(); });
+  safeBind("runManualBtn", () => runManual());
+  safeBind("runScoutBtn", () => runStockScout());
+  safeBind("startSchedulerBtn", () => startScheduler());
+  safeBind("stopSchedulerBtn", () => stopScheduler());
+  safeBind("initializeBtn", () => initializeWorkspace());
+
+  const scoutList = $("scoutRecommendations");
+  if (scoutList) {
+    scoutList.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-action]");
+      if (!btn) return;
+      const recId = btn.dataset.recId;
+      const action = btn.dataset.action;
+      if (action === "accept-scout") handleScoutAction(recId, "accept");
+      if (action === "reject-scout") handleScoutAction(recId, "reject");
+    });
+  }
+
   document.querySelectorAll(".nav-item, .nav-shortcut").forEach((button) => {
     button.addEventListener("click", () => {
       switchPage(button.dataset.page);
       if (button.dataset.page === "trace") ensureTraceSelection();
+      if (button.dataset.page === "logs") loadLogs();
+      if (button.dataset.page === "scheduler-config") {
+        state.schedulerConfigRendered = false;
+        loadMxQuota();
+      }
+      if (button.dataset.page === "scout") loadScoutRecommendations();
     });
   });
 }
 
+function autoRefresh() {
+  refresh();
+  const activePage = document.querySelector(".page-view.active");
+  if (activePage) {
+    if (activePage.id === "page-logs") loadLogs();
+    if (activePage.id === "page-scout") loadScoutRecommendations();
+  }
+}
+
 bindEvents();
 refresh();
-setInterval(refresh, 3000);
+setInterval(autoRefresh, 3000);

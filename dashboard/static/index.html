@@ -34,6 +34,15 @@
             <span class="nav-icon">⏱</span>
             <span>调度配置</span>
           </button>
+          <button class="nav-item" data-page="scout" type="button">
+            <span class="nav-icon">🔍</span>
+            <span>选股推荐</span>
+            <span id="scoutBadge" class="tag" style="display:none">0</span>
+          </button>
+          <button class="nav-item" data-page="logs" type="button">
+            <span class="nav-icon">📋</span>
+            <span>运行日志</span>
+          </button>
         </nav>
         <div class="sidebar-footer">
           <span id="liveStatus" class="status-pill">LIVE</span>
@@ -412,6 +421,14 @@
                       <span>子 Agent</span>
                       <strong id="schedulerSubagentSummary">--</strong>
                     </div>
+                    <div>
+                      <span>选股设置</span>
+                      <strong><a class="nav-shortcut" data-page="scheduler-config" style="cursor:pointer;color:var(--accent-2);text-decoration:underline;font-size:13px">编辑规则</a></strong>
+                    </div>
+                  </div>
+                  <div class="scheduler-actions" style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+                    <button id="runScoutBtn" class="secondary-button" type="button">🔍 自动选股</button>
+                    <span id="scoutMessage" class="inline-message" style="font-size:12px"></span>
                   </div>
                   <div id="schedulerTriggerList" class="trigger-list"></div>
                 </div>
@@ -526,26 +543,57 @@
 
                 <section class="scheduler-section">
                   <div class="scheduler-section-head">
-                    <div>
-                      <span>Market Sessions</span>
-                      <h3>交易时段巡检</h3>
-                    </div>
-                    <button id="addMarketSessionBtn" class="secondary-button" type="button">新增时段</button>
+                    <span>Sub Agents</span>
+                    <h3>子 Agent</h3>
                   </div>
-                  <div id="marketSessionsEditor" class="scheduler-editor-list"></div>
+                  <div id="marketSubagentsEditor" class="scheduler-editor-list"></div>
                 </section>
 
                 <section class="scheduler-section">
                   <div class="scheduler-section-head">
                     <div>
-                      <span>Sub Agents</span>
-                      <h3>子 Agent</h3>
+                      <span>Quota</span>
+                      <h3>mx-data 额度估算</h3>
                     </div>
+                    <a class="secondary-button" id="refreshQuotaBtn" style="cursor:pointer">刷新计算</a>
                   </div>
-                  <div id="marketSubagentsEditor" class="scheduler-editor-list"></div>
+                  <div id="mxQuotaPanel" class="mx-quota-panel">
+                    <div class="mx-quota-loading">加载中...</div>
+                  </div>
                 </section>
               </div>
               <p id="schedulerConfigMessage" class="inline-message"></p>
+            </section>
+          </section>
+
+          <section id="page-scout" class="page-view">
+            <section class="panel scout-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Stock Scout</p>
+                  <h2>选股推荐</h2>
+                </div>
+                <div class="panel-actions">
+                  <span id="scoutCount" class="tag">--</span>
+                </div>
+              </div>
+              <div id="scoutRecommendations" class="scout-list">
+                <div class="scout-loading">加载中...</div>
+              </div>
+            </section>
+          </section>
+
+          <section id="page-logs" class="page-view">
+            <section class="panel logs-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Runtime Logs</p>
+                  <h2>运行日志</h2>
+                </div>
+                <span id="logsTotalBadge" class="tag">--</span>
+              </div>
+              <div id="logsSummary" class="logs-summary"></div>
+              <div id="logsRunList" class="logs-run-list"></div>
             </section>
           </section>
         </main>

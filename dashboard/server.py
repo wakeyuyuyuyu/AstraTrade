@@ -94,7 +94,7 @@ def agent_subprocess_env() -> Dict[str, str]:
     env = os.environ.copy()
     python_path = Path(AGENT_PYTHON)
     python_bin = str(python_path.parent)
-    env["PATH"] = f"{python_bin}:{env.get('PATH', '')}"
+    env["PATH"] = f"{python_bin}{os.pathsep}{env.get('PATH', '')}"
 
     if python_path.parent.parent.name == DEFAULT_AGENT_ENV_NAME:
         env["CONDA_DEFAULT_ENV"] = DEFAULT_AGENT_ENV_NAME
@@ -383,6 +383,79 @@ def default_scheduler_config() -> Dict[str, Any]:
         "fixed_jobs": [],
         "market_sessions": [],
         "market_subagents": [],
+    }
+
+
+def mx_quota_payload() -> Dict[str, Any]:
+    CANDIDATES_PATH = WORKSPACE_DIR / "pools" / "candidates.jsonl"
+    HOLDINGS_PATH = WORKSPACE_DIR / "pools" / "holdings.jsonl"
+
+    config = read_json(SCHEDULER_CONFIG_PATH, default_scheduler_config())
+    if not isinstance(config, dict):
+        config = default_scheduler_config()
+
+    sessions = config.get("market_sessions") or []
+    candidate_count = 0
+    holding_count = 0
+
+    if CANDIDATES_PATH.exists() and CANDIDATES_PATH.stat().st_size > 0:
+        try:
+            candidates = read_jsonl(CANDIDATES_PATH)
+            candidate_count = len(candidates)
+        except Exception:
+            pass
+
+    if HOLDINGS_PATH.exists() and HOLDINGS_PATH.stat().st_size > 0:
+        try:
+            holdings = read_jsonl(HOLDINGS_PATH)
+            holding_count = len(holdings)
+        except Exception:
+            pass
+
+    def parse_minutes(t: str) -> int:
+        try:
+            h, m = map(int, t.strip().split(":"))
+            return h * 60 + m
+        except Exception:
+            return 0
+
+    runs_per_day = 0
+    session_details = []
+    for session in sessions:
+        start = parse_minutes(session.get("start", "09:30"))
+        end = parse_minutes(session.get("end", "11:30"))
+        interval = int(session.get("interval_minutes", 10))
+        if interval <= 0:
+            continue
+        if end <= start:
+            continue
+        runs = (end - start) // interval
+        runs_per_day += runs
+        session_details.append({
+            "start": session.get("start", "09:30"),
+            "end": session.get("end", "11:30"),
+            "interval_minutes": interval,
+            "runs": runs,
+        })
+
+    candidate_calls_per_run = candidate_count
+    total_daily = runs_per_day * candidate_calls_per_run
+
+    promo_quota = 150
+    normal_quota = 50
+
+    return {
+        "candidate_count": candidate_count,
+        "holding_count": holding_count,
+        "session_details": session_details,
+        "runs_per_day": runs_per_day,
+        "total_daily_calls": total_daily,
+        "promo_quota": promo_quota,
+        "normal_quota": normal_quota,
+        "promo_sufficient": total_daily <= promo_quota,
+        "normal_sufficient": total_daily <= normal_quota,
+        "promo_remaining": max(0, promo_quota - total_daily),
+        "normal_remaining": max(0, normal_quota - total_daily),
     }
 
 
@@ -1655,6 +1728,130 @@ def start_manual_run(task: str, max_steps: int = 50) -> Dict[str, Any]:
     return record
 
 
+RECOMMEND_PATH = WORKSPACE_DIR / "pools" / "scout_recommendations.jsonl"
+CANDIDATES_PATH = WORKSPACE_DIR / "pools" / "candidates.jsonl"
+
+
+def read_scout_recommendations() -> List[Dict[str, Any]]:
+    return read_jsonl(RECOMMEND_PATH)
+
+
+def write_scout_recommendations(items: List[Dict[str, Any]]) -> None:
+    RECOMMEND_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(RECOMMEND_PATH, "w", encoding="utf-8") as f:
+        for item in items:
+            f.write(json.dumps(item, ensure_ascii=False) + "\n")
+
+
+def accept_scout_recommendation(rec_id: str) -> Dict[str, Any]:
+    recs = read_scout_recommendations()
+    target = None
+    for rec in recs:
+        if rec.get("id") == rec_id:
+            target = rec
+            break
+    if target is None:
+        raise ValueError(f"未找到推荐: {rec_id}")
+    if target.get("status") != "pending":
+        raise ValueError(f"推荐 {rec_id} 状态不是 pending")
+
+    now = now_str()
+    candidate = {
+        "candidate_id": f"RECMD-{now[:10].replace('-', '')}-{rec_id.split('-')[-1]}",
+        "symbol": target["symbol"],
+        "name": target["name"],
+        "reason": target.get("reason", ""),
+        "source": "stock_scout",
+        "tags": [],
+        "score": 0,
+        "status": "watching",
+        "current_price": 0,
+        "trigger": {"type": "manual", "price": 0, "condition": "等待人工确认买入时机"},
+        "buy_plan": {"planned_quantity": 0, "planned_cash": 0, "max_position_ratio": 0.5},
+        "risk": {"stop_loss_price": 0, "take_profit_price": 0},
+        "valid_until": "",
+        "added_at": now,
+        "updated_at": now,
+        "evidence": [{"source": "stock_scout", "summary": target.get("reason", "")}],
+        "next_action": "等待进一步分析",
+        "notes": f"自动选股推荐：{target.get('reason', '')}",
+    }
+
+    CANDIDATES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(CANDIDATES_PATH, "a", encoding="utf-8") as f:
+        f.write(json.dumps(candidate, ensure_ascii=False) + "\n")
+
+    target["status"] = "accepted"
+    target["accepted_at"] = now
+    write_scout_recommendations(recs)
+
+    return {"success": True, "candidate": candidate, "recommendation": target}
+
+
+def reject_scout_recommendation(rec_id: str) -> Dict[str, Any]:
+    recs = read_scout_recommendations()
+    target = None
+    for rec in recs:
+        if rec.get("id") == rec_id:
+            target = rec
+            break
+    if target is None:
+        raise ValueError(f"未找到推荐: {rec_id}")
+
+    target["status"] = "rejected"
+    target["rejected_at"] = now_str()
+    write_scout_recommendations(recs)
+
+    return {"success": True, "recommendation": target}
+
+
+def start_stock_scout() -> Dict[str, Any]:
+    with STATE.lock:
+        if STATE.active_process is not None and STATE.active_process.poll() is None:
+            raise RuntimeError("已有进程正在运行，请等待本轮结束")
+
+        record = {
+            "id": f"scout_{int(time.time())}",
+            "started_at": now_str(),
+            "status": "running",
+        }
+
+        cmd = [AGENT_PYTHON, "-m", "subagent.stock_scout.exec_agent"]
+
+        process = subprocess.Popen(
+            cmd,
+            cwd=str(ROOT),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=agent_subprocess_env(),
+        )
+
+        STATE.active_process = process
+        STATE.active_run = record
+
+    def finish() -> None:
+        stdout, stderr = process.communicate()
+        ended = now_str()
+        final = dict(record)
+        final.update(
+            {
+                "ended_at": ended,
+                "status": "success" if process.returncode == 0 else "failed",
+                "exit_code": process.returncode,
+                "stdout_preview": (stdout or "")[-3000:],
+                "stderr_preview": (stderr or "")[-3000:],
+            }
+        )
+        with STATE.lock:
+            if STATE.active_process is process:
+                STATE.active_process = None
+                STATE.active_run = None
+
+    threading.Thread(target=finish, daemon=True).start()
+    return record
+
+
 def save_style_config(payload: Dict[str, Any]) -> Dict[str, Any]:
     config = payload.get("config", payload)
     if not isinstance(config, dict):
@@ -1677,6 +1874,92 @@ def save_style_config(payload: Dict[str, Any]) -> Dict[str, Any]:
             "config": rel(STYLE_CONFIG_PATH),
             "style_md": rel(output_path),
         },
+    }
+
+
+def count_step_types(run_dir: Path) -> Dict[str, int]:
+    counts = {"thinking": 0, "tool_call": 0, "final": 0, "error": 0}
+    for output_file in sorted(run_dir.glob("step_*_output.json")):
+        data = read_json(output_file, {})
+        if not isinstance(data, dict):
+            continue
+        parsed = data.get("parsed_output", {})
+        if not isinstance(parsed, dict):
+            continue
+        t = parsed.get("type", "")
+        if t in counts:
+            counts[t] += 1
+    return counts
+
+
+def build_runtime_logs() -> Dict[str, Any]:
+    runs_dir = WORKSPACE_DIR / "logs" / "agent_runs"
+
+    runs: List[Dict[str, Any]] = []
+    if runs_dir.exists():
+        for run_dir in sorted(runs_dir.iterdir()):
+            if not run_dir.is_dir():
+                continue
+            summary = read_json(run_dir / "run_summary.json", {})
+            if not isinstance(summary, dict) or not summary:
+                continue
+            step_counts = count_step_types(run_dir)
+            started_at = summary.get("started_at", "")
+            ended_at = summary.get("ended_at", "")
+            duration = summary.get("duration_seconds")
+            runs.append({
+                "run_id": run_dir.name,
+                "mode": summary.get("mode", ""),
+                "phase": summary.get("phase", ""),
+                "started_at": started_at,
+                "ended_at": ended_at,
+                "duration_seconds": duration,
+                "success": summary.get("success"),
+                "steps": summary.get("steps", 0),
+                "tool_call_count": summary.get("tool_call_count", 0),
+                "thinking_count": step_counts.get("thinking", 0),
+                "error_count": step_counts.get("error", 0),
+                "summary": summary.get("summary", ""),
+            })
+
+    runs.sort(key=lambda r: r.get("started_at", ""), reverse=True)
+
+    manual_runs = read_jsonl(MANUAL_RUNS_PATH, limit=50)
+    scheduler_calls = parse_scheduler_calls(scheduler_log_paths(), limit=50)
+
+    total = len(runs)
+    success_count = sum(1 for r in runs if r.get("success") is True)
+    failure_count = sum(1 for r in runs if r.get("success") is False)
+    total_model_calls = sum(r.get("steps", 0) for r in runs)
+    total_tool_calls = sum(r.get("tool_call_count", 0) for r in runs)
+    total_errors = sum(r.get("error_count", 0) for r in runs)
+    durations = [r["duration_seconds"] for r in runs if r.get("duration_seconds") is not None]
+    avg_duration = round(sum(durations) / len(durations), 1) if durations else 0
+
+    return {
+        "summary": {
+            "total_runs": total,
+            "success_count": success_count,
+            "failure_count": failure_count,
+            "total_model_calls": total_model_calls,
+            "total_tool_calls": total_tool_calls,
+            "total_errors": total_errors,
+            "avg_duration_seconds": avg_duration,
+        },
+        "runs": runs,
+        "manual_runs": [
+            {
+                "id": r.get("id"),
+                "task": r.get("task"),
+                "started_at": r.get("started_at"),
+                "ended_at": r.get("ended_at"),
+                "status": r.get("status"),
+                "exit_code": r.get("exit_code"),
+                "max_steps": r.get("max_steps"),
+            }
+            for r in reversed(manual_runs)
+        ],
+        "scheduler_calls": scheduler_calls,
     }
 
 
@@ -1736,6 +2019,21 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(initialization_status())
             return
 
+        if path == "/api/mx-quota":
+            self.send_json(mx_quota_payload())
+            return
+
+        if path == "/api/scout-recommendations":
+            self.send_json({
+                "recommendations": read_scout_recommendations(),
+                "pending_count": sum(1 for r in read_scout_recommendations() if r.get("status") == "pending"),
+            })
+            return
+
+        if path == "/api/runtime-logs":
+            self.send_json(build_runtime_logs())
+            return
+
         if path == "/api/trace":
             run_id = parse_qs(parsed.query).get("run_id", [""])[0]
             self.send_json(read_trace_by_run_id(run_id))
@@ -1766,6 +2064,26 @@ class Handler(BaseHTTPRequestHandler):
                 task = str(body.get("task", ""))
                 max_steps = int(body.get("max_steps", 50))
                 self.send_json({"success": True, "run": start_manual_run(task, max_steps=max_steps)})
+                return
+
+            if parsed.path == "/api/stock-scout":
+                self.send_json(start_stock_scout())
+                return
+
+            if parsed.path == "/api/scout-recommendations/accept":
+                rec_id = str(body.get("id", "")).strip()
+                if not rec_id:
+                    self.send_error_json("缺少 id", status=400)
+                    return
+                self.send_json(accept_scout_recommendation(rec_id))
+                return
+
+            if parsed.path == "/api/scout-recommendations/reject":
+                rec_id = str(body.get("id", "")).strip()
+                if not rec_id:
+                    self.send_error_json("缺少 id", status=400)
+                    return
+                self.send_json(reject_scout_recommendation(rec_id))
                 return
 
             if parsed.path == "/api/api-config":

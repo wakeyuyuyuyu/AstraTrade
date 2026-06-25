@@ -3237,3 +3237,286 @@ td.negative {
     min-width: 112px;
   }
 }
+
+/* ===== Logs Page ===== */
+.logs-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  padding: 0 16px 16px;
+}
+.logs-stat-card {
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 14px;
+  text-align: center;
+}
+.logs-stat-card span {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+.logs-stat-card strong {
+  font-size: 22px;
+  color: var(--ink);
+}
+.logs-stat-card .stat-ok { color: var(--ok); }
+.logs-stat-card .stat-fail { color: var(--danger); }
+.logs-stat-card .stat-neutral { color: var(--accent-3); }
+
+.logs-run-list {
+  padding: 0 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.logs-run-card {
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 14px;
+  border-left: 3px solid var(--surface-3);
+}
+.logs-run-card.success { border-left-color: var(--ok); }
+.logs-run-card.failed { border-left-color: var(--danger); }
+.logs-run-card.incomplete { border-left-color: var(--warn); }
+.logs-run-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.logs-run-card-head strong {
+  font-size: 14px;
+  color: var(--ink);
+  font-family: monospace;
+}
+.logs-run-card-head .tag {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.logs-run-card-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.logs-run-card-body span { white-space: nowrap; }
+.logs-run-card-summary {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--ink);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.logs-run-card-detail {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.logs-run-card-detail .chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  background: var(--surface-3);
+  color: var(--muted);
+}
+.logs-run-card-detail .chip.thinking { color: var(--accent-3); }
+.logs-run-card-detail .chip.tool_call { color: var(--accent); }
+.logs-run-card-detail .chip.error { color: var(--danger); }
+
+.logs-empty {
+  padding: 40px 16px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.mx-quota-panel {
+  padding: 0 4px 4px;
+}
+.mx-quota-loading {
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 14px;
+}
+.mx-quota-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.mx-quota-card {
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 14px;
+  border-left: 3px solid var(--surface-3);
+}
+.mx-quota-card.label {
+  border-left-color: var(--accent-3);
+}
+.mx-quota-card.calls {
+  border-left-color: var(--warn);
+}
+.mx-quota-card.promo {
+  border-left-color: var(--ok);
+}
+.mx-quota-card.normal {
+  border-left-color: var(--danger);
+}
+.mx-quota-card h4 {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0 0 4px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.mx-quota-card .value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--ink);
+  font-family: monospace;
+}
+.mx-quota-card .value .unit {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.mx-quota-card .sub {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.mx-quota-card .status-tag {
+  display: inline-block;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin-top: 4px;
+}
+.mx-quota-card .status-tag.ok {
+  background: rgba(79, 224, 141, 0.15);
+  color: var(--ok);
+}
+.mx-quota-card .status-tag.fail {
+  background: rgba(255, 109, 109, 0.15);
+  color: var(--danger);
+}
+.mx-quota-live-hint {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: var(--surface-3);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.scout-list {
+  padding: 0 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.scout-loading {
+  padding: 40px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 14px;
+}
+.scout-empty {
+  padding: 40px 16px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 14px;
+}
+.scout-card {
+  background: var(--surface-2);
+  border-radius: 10px;
+  padding: 16px;
+  border-left: 3px solid var(--accent);
+}
+.scout-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.scout-card-head-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.scout-card-head-left strong {
+  font-size: 16px;
+  color: var(--ink);
+  font-family: monospace;
+}
+.scout-card-head-left .tag {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.scout-card-actions {
+  display: flex;
+  gap: 6px;
+}
+.scout-card-actions button {
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+}
+.scout-card-actions .accept-btn {
+  background: rgba(79, 224, 141, 0.2);
+  color: var(--ok);
+}
+.scout-card-actions .accept-btn:hover {
+  background: rgba(79, 224, 141, 0.35);
+}
+.scout-card-actions .reject-btn {
+  background: rgba(255, 109, 109, 0.15);
+  color: var(--danger);
+}
+.scout-card-actions .reject-btn:hover {
+  background: rgba(255, 109, 109, 0.3);
+}
+.scout-card-reason {
+  font-size: 13px;
+  color: var(--ink);
+  line-height: 1.5;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  background: var(--surface-3);
+  border-radius: 6px;
+}
+.scout-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.scout-card .status-tag.accepted {
+  background: rgba(79, 224, 141, 0.15);
+  color: var(--ok);
+}
+.scout-card .status-tag.rejected {
+  background: rgba(255, 109, 109, 0.15);
+  color: var(--danger);
+}
+.scout-card .status-tag.pending {
+  background: rgba(246, 198, 91, 0.15);
+  color: var(--warn);
+}

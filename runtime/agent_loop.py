@@ -4,11 +4,108 @@ import json
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from services.llm_service import call_llm
 from tools.exec import exec_command
 from tools.file_tools import FileTools
+
+
+# OpenAI 原生 function calling 工具定义。
+# 传入 call_llm 的 tools 参数后，DeepSeek API 返回结构化 tool_calls，
+# 绕过模型自己拼接 JSON 文本，大幅降低多轮对话中空返回的概率。
+AGENT_TOOLS: List[Dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "read",
+            "description": "读取 workspace 下的文件内容",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "相对于 workspace/ 的文件路径"}
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "write",
+            "description": "写入或覆盖 workspace 下的文件",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "相对于 workspace/ 的文件路径"},
+                    "content": {"type": "string", "description": "写入内容"},
+                },
+                "required": ["path", "content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "edit",
+            "description": "编辑 workspace 下的文件（精确替换）",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "相对于 workspace/ 的文件路径"},
+                    "oldText": {"type": "string", "description": "被替换的旧文本（精确匹配）"},
+                    "newText": {"type": "string", "description": "替换为新文本"},
+                },
+                "required": ["path", "oldText", "newText"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "add",
+            "description": "在文件末尾追加内容",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "相对于 workspace/ 的文件路径"},
+                    "content": {"type": "string", "description": "追加内容"},
+                },
+                "required": ["path", "content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "exec",
+            "description": "在项目根目录执行 shell 命令",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string", "description": "要执行的 shell 命令"},
+                    "cwd": {"type": "string", "description": "工作目录（相对于 workspace/，默认 .）"},
+                },
+                "required": ["command"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "write_memory",
+            "description": "写入记忆文件",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "type": {"type": "string", "description": "记忆类型"},
+                    "content": {"type": "string", "description": "记忆内容"},
+                },
+                "required": ["type", "content"],
+            },
+        },
+    },
+]
 
 
 DEFAULT_FINAL_FIELDS = {
@@ -413,7 +510,7 @@ def run_agent_loop(
             )
 
         try:
-            response_text = call_llm(messages, "main")
+            response_text = call_llm(messages, "main", tools=AGENT_TOOLS)
         except RuntimeError as e:
             response_text = json.dumps({
                 "type": "error",
