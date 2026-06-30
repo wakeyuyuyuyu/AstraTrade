@@ -3004,6 +3004,7 @@ def _auto_refresh_loop() -> None:
                 or (now.hour == 11 and now.minute <= 30)
                 or now.hour == 13
                 or now.hour == 14
+                or (now.hour == 15 and now.minute == 0)
             )
         )
         if market_hours:
