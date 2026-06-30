@@ -306,7 +306,13 @@ def render_system_prompt(
     # 7. 加载动态运行上下文
     prompt_parts.append(dynamic_context)
 
-    return "\n\n---\n\n".join(prompt_parts).strip() + "\n"
+    # 8. 注入近期记忆摘要（用于持续改进）
+    from runtime.build_context import inject_recent_memories_markdown
+    project_root = Path(system_dir).parent
+    combined = "\n\n---\n\n".join(prompt_parts).strip() + "\n"
+    combined = inject_recent_memories_markdown(combined, project_root)
+
+    return combined
 
 
 if __name__ == "__main__":

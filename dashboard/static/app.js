@@ -7,11 +7,14 @@ const state = {
   apiRendered: false,
   schedulerConfigRendered: false,
   refreshing: false,
+  refreshingAll: false,
   selectedRunId: "",
   traceCache: {},
   traceLoadingRunId: "",
   workstreamFallbackRunId: "",
   workstreamFallbackLoading: false,
+  retryIndex: 0,
+  retryTimer: null,
 };
 
 const dimensionTitles = {
@@ -352,6 +355,15 @@ function accountStatus(account, holdings) {
   };
 }
 
+function setReturnRate(id, rate) {
+  const node = $(id);
+  if (!node) return;
+  if (!Number.isFinite(rate)) { node.textContent = "--"; return; }
+  const sign = rate >= 0 ? "+" : "";
+  node.textContent = `${sign}${rate.toFixed(2)}%`;
+  node.className = `return-rate ${rate >= 0 ? "positive" : "negative"}`;
+}
+
 function marketStatus(market) {
   const view = String(market.market_view || "unknown").toLowerCase();
   const risk = String(market.risk_level || "unknown").toLowerCase();
@@ -472,6 +484,10 @@ function renderAccount(data) {
     usage: risk.stop_trading ? 1 : 0,
     hardStop: Boolean(risk.stop_trading),
   });
+
+  const initCash = Number(account.initial_cash) || 1000000;
+  const returnRate = initCash > 0 ? ((totalAsset - initCash) / initCash * 100) : 0;
+  setReturnRate("accountReturnRate", returnRate);
 
   const assetPie = $("assetPie");
   if (assetPie) {
@@ -2612,25 +2628,44 @@ function renderRunCard(run) {
   return card;
 }
 
-function renderLogs(data) {
-  if (!data) return;
-  logsCache = data;
-  text("logsTotalBadge", `${data.summary?.total_runs || 0} 次`);
-  renderLogsSummary(data.summary);
-  const list = $("logsRunList");
-  if (!list) return;
-  clearNode(list);
+function renderAgentActionsLog(agentActions) {
+  const node = $("agentActionsLog");
+  const badge = $("agentActionsBadge");
+  if (!node) return;
+  clearNode(node);
 
-  const runs = data.runs || [];
-  if (!runs.length) {
+  if (!agentActions || !agentActions.lines || !agentActions.lines.length) {
+    if (badge) badge.textContent = "空";
     const empty = document.createElement("div");
     empty.className = "logs-empty";
-    empty.textContent = "暂无运行记录";
-    list.appendChild(empty);
+    empty.textContent = "暂无 Agent 动作日志";
+    node.appendChild(empty);
     return;
   }
 
-  runs.forEach((run) => list.appendChild(renderRunCard(run)));
+  if (badge) badge.textContent = `${agentActions.showing || agentActions.lines.length} 条`;
+
+  const pre = document.createElement("pre");
+  pre.className = "agent-actions-pre";
+  pre.textContent = agentActions.lines.join("\n");
+  node.appendChild(pre);
+}
+
+function renderLogs(data) {
+  if (!data) return;
+  logsCache = data;
+  renderAgentActionsLog(data.agent_actions);
+}
+
+async function loadLogs() {
+  try {
+    const response = await fetch("/api/runtime-logs", { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    renderLogs(data);
+  } catch (error) {
+    console.error("Failed to load logs:", error);
+  }
 }
 
 async function loadScoutRecommendations() {
@@ -2744,6 +2779,8 @@ function render(data) {
   }
 }
 
+const RETRY_DELAYS = [1, 2, 4, 8, 15, 30];
+
 async function refresh() {
   if (state.refreshing) return;
   state.refreshing = true;
@@ -2753,16 +2790,58 @@ async function refresh() {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
     setLive(true);
+    state.retryIndex = 0;
     render(data);
   } catch (error) {
     setLive(false);
-    setMessage("manualMessage", "Dashboard 服务未连接。请在项目根目录运行：python dashboard/server.py 8787", "error");
+    state.retryIndex = Math.min(state.retryIndex + 1, RETRY_DELAYS.length - 1);
+    const delaySec = RETRY_DELAYS[state.retryIndex];
+    const msg = "Dashboard 服务未连接" +
+      (delaySec > 3 ? "，正在自动重试中..." : "");
+    setMessage("manualMessage", msg, "error");
     setMessage("styleMessage", "保存风格需要 dashboard 服务在线。", "error");
     setMessage("apiMessage", "保存 API 配置需要 dashboard 服务在线。", "error");
     setMessage("schedulerConfigMessage", "保存调度配置需要 dashboard 服务在线。", "error");
-    console.error(error);
+    clearTimeout(state.retryTimer);
+    state.retryTimer = setTimeout(refresh, delaySec * 1000);
+    console.error("Snapshot fetch failed, retrying in " + delaySec + "s:", error);
   } finally {
     state.refreshing = false;
+  }
+}
+
+async function refreshAll() {
+  if (state.refreshingAll) return;
+  state.refreshingAll = true;
+  const statusEl = $("refreshAllStatus");
+  const btn = $("refreshAllBtn");
+  if (statusEl) statusEl.textContent = "刷新中…";
+  if (btn) btn.disabled = true;
+
+  try {
+    const response = await fetch("/api/refresh-all", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const result = await response.json();
+    if (statusEl) {
+      if (result.success) {
+        statusEl.textContent = `✅ 刷新完成 (${result.updated_at})`;
+      } else if (result.partial) {
+        statusEl.textContent = `⚠️ 部分完成 (${result.errors?.join("; ") || ""})`;
+      } else {
+        statusEl.textContent = `❌ 刷新失败 (${result.errors?.join("; ") || ""})`;
+      }
+    }
+    setTimeout(() => refresh(), 500);
+  } catch (error) {
+    if (statusEl) statusEl.textContent = `❌ 请求失败: ${error.message}`;
+    console.error(error);
+  } finally {
+    state.refreshingAll = false;
+    if (btn) btn.disabled = false;
   }
 }
 
@@ -2774,6 +2853,7 @@ function safeBind(id, fn) {
 
 function bindEvents() {
   safeBind("refreshBtn", () => refresh());
+  safeBind("refreshAllBtn", () => refreshAll());
   safeBind("saveStyleBtn", () => saveStyle());
   safeBind("saveApiBtn", () => saveApiConfig());
   safeBind("saveSchedulerConfigBtn", () => saveSchedulerConfig());

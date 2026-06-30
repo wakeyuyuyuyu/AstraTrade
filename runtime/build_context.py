@@ -2,14 +2,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, asdict
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
 VALID_MODES = {"scheduler", "manual", "trigger"}
-# TURE_ASSET = 20000
-TURE_ASSET = 1000000
 
 @dataclass
 class RuntimeContext:
@@ -269,10 +267,9 @@ def build_context(
 
     account_state = read_json_file(state_dir / "account_state.json", default={})
 
-    # 修改为实际总资产
-    account_state["total_asset"] = account_state["total_asset"] - 1000000 + TURE_ASSET
-    account_state["cash"] = account_state["cash"] - 1000000 + TURE_ASSET
-    account_state["available_cash"] = account_state["available_cash"] - 1000000 + TURE_ASSET
+    # 确保初始资金从 account_state.json 的 initial_cash 读取
+    if not account_state.get("initial_cash"):
+        account_state["initial_cash"] = 1000000.0
 
 
     market_state = read_json_file(state_dir / "market_state.json", default={})
@@ -315,6 +312,37 @@ def build_context(
         recent_trades=recent_trades,
         recent_events=recent_events,
     )
+
+
+def load_recent_memories(root_dir: Path, days: int = 7) -> str:
+    mem_dir = root_dir / "memory"
+    if not mem_dir.exists():
+        return ""
+
+    today = datetime.now()
+    entries: List[str] = []
+
+    for offset in range(1, days + 1):
+        date_str = (today - timedelta(days=offset)).strftime("%Y-%m-%d")
+        mem_path = mem_dir / date_str / "eod_review.md"
+        if mem_path.exists():
+            content = mem_path.read_text(encoding="utf-8").strip()
+            lines = content.splitlines()
+            summary_lines = [l for l in lines if l.startswith("## ")][:4]
+            summary_text = "\n".join(summary_lines) if summary_lines else "(无结构化摘要)"
+            entries.append(f"### {date_str}\n{summary_text}")
+
+    if not entries:
+        return ""
+
+    return "\n\n".join([
+        "## 12. 近期记忆参考（最近 EOD 复盘摘要）",
+        "",
+        "以下为最近几日收盘复盘的摘要标题，供你参考历史判断和持续改进。",
+        "完整内容可通过 read_memory 工具读取。",
+        "",
+        *entries,
+    ])
 
 
 def build_context_markdown(context: RuntimeContext) -> str:
@@ -409,6 +437,14 @@ def build_context_markdown(context: RuntimeContext) -> str:
 
 {pools_schema}
 """
+
+
+def inject_recent_memories_markdown(markdown: str, root_dir: Path) -> str:
+    memories_block = load_recent_memories(root_dir)
+    if not memories_block:
+        return markdown
+    return markdown + "\n\n---\n\n" + memories_block
+
 
 
 if __name__ == "__main__":

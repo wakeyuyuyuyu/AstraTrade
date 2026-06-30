@@ -203,7 +203,8 @@ def normalize_command(command: str) -> list[str]:
     return parts
 
 
-def run_command(task_name: str, command: str) -> int:
+def run_command(task_name: str, command: str, timeout: int = 1800) -> int:
+    """运行子进程并等待完成。默认 timeout=1800 秒（30分钟），超时后 SIGTERM 杀死进程。"""
     args = normalize_command(command)
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
@@ -222,7 +223,11 @@ def run_command(task_name: str, command: str) -> int:
             shell=False,
             close_fds=True,
             env=env,
+            timeout=timeout,
         )
+    except subprocess.TimeoutExpired:
+        write_log(f"TIMEOUT task={task_name} exceeded {timeout}s")
+        return -1
     except Exception as e:
         write_log(f"SUBPROCESS_ERROR task={task_name} error={repr(e)}")
         return -1
@@ -523,6 +528,12 @@ def run_due_alarms(now: datetime, last_run_keys: set[str]) -> None:
 
 def main() -> None:
     cfg = load_config()
+
+    try:
+        from services.agent_logger import log
+        log("scheduler", "RESTART", "scheduler process started")
+    except Exception:
+        pass
 
     tz = ZoneInfo(
         cfg.get("timezone", "Asia/Shanghai")

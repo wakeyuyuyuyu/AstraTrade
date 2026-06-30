@@ -9,11 +9,19 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
+
+import requests
+from dotenv import load_dotenv
+load_dotenv()
+
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -1157,6 +1165,9 @@ def reconcile_account_from_holdings(account: Dict[str, Any], holdings: List[Dict
     else:
         available_cash = max(account_cash, 0)
 
+    initial = float(reconciled.get("initial_cash", 1000000.0) or 1000000.0)
+    reconciled["total_return_rate"] = round((total_asset - initial) / initial * 100, 2) if initial > 0 else 0.0
+
     reconciled["market_value"] = holdings_market_value
     reconciled["position_count"] = len(current_holdings)
     reconciled["total_asset"] = total_asset
@@ -1587,7 +1598,11 @@ def start_initialization() -> Dict[str, Any]:
         STATE.active_initialization = record
 
     def finish() -> None:
-        return_code = process.wait()
+        try:
+            return_code = process.wait(timeout=1800)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            return_code = process.wait(timeout=5)
         final = dict(record)
         final.update(
             {
@@ -1662,6 +1677,734 @@ def build_snapshot() -> Dict[str, Any]:
     }
 
 
+def _mxdata_query(tool_query: str, timeout: int = 30, max_retries: int = 3) -> Dict[str, Any]:
+    """直接调用 mx-data API 并返回原始 JSON。
+
+    失败时按 2/4/6 秒重试，最后给出具体诊断（SSL 阻断 / 超时 / 代理指引）。
+    """
+    api_key = os.environ.get("MX_APIKEY", "").strip()
+    if not api_key:
+        raise RuntimeError("MX_APIKEY 未配置")
+
+    proxies = {}
+    https_proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or ""
+    if https_proxy.strip():
+        proxies["https"] = https_proxy.strip()
+
+    url = "https://mkapi2.dfcfs.com/finskillshub/api/claw/query"
+    headers = {"Content-Type": "application/json", "apikey": api_key}
+
+    last_error: Optional[Exception] = None
+    for attempt in range(max_retries):
+        try:
+            resp = requests.post(
+                url, headers=headers, json={"toolQuery": tool_query},
+                timeout=timeout, verify=False,
+                proxies=proxies or None,
+            )
+            resp.raise_for_status()
+            raw_text = resp.text.strip()
+            if not raw_text:
+                raise RuntimeError(f"API 返回空内容 (status={resp.status_code})")
+            try:
+                return resp.json()
+            except json.JSONDecodeError as e:
+                raise RuntimeError(f"API 返回非 JSON 格式: {e} | 前200字: {raw_text[:200]}")
+        except Exception as e:
+            last_error = e
+            if attempt < max_retries - 1:
+                time.sleep((attempt + 1) * 2)
+
+    _raise_diagnostic_error(last_error, proxies, url)  # type: ignore[arg-type]
+
+
+def _raise_diagnostic_error(last_error: Exception | None, proxies: dict, url: str) -> None:
+    """根据错误类型和代理配置给出具体诊断。"""
+    if last_error is None:
+        raise RuntimeError(f"妙想 API 请求失败（无详细错误）")
+    err_str = str(last_error)
+    err_type = type(last_error).__name__
+
+    if "SSL" in err_type or "ssl" in err_str.lower() or "UNEXPECTED_EOF" in err_str:
+        if not proxies:
+            raise RuntimeError(
+                f"妙想 API 地址 {url} SSL 握手失败，可能是网络防火墙阻断了国内金融数据域名。\n"
+                f"诊断：{last_error}\n"
+                f"解决方案：设置 HTTPS_PROXY 环境变量（需要可访问国内站点的代理），\n"
+                f"例如在 .env 文件中添加：HTTPS_PROXY=http://127.0.0.1:7890"
+            )
+        raise RuntimeError(
+            f"妙想 API SSL 握手失败（已配置代理 {list(proxies.values())}）。\n"
+            f"诊断：{last_error}\n"
+            f"请检查代理是否可用或 MX_API_URL 是否正确。"
+        )
+
+    if "Timeout" in err_type or "timeout" in err_str.lower():
+        raise RuntimeError(f"妙想 API 请求超时（已等待 30 秒）。请检查网络连接。\n诊断：{last_error}")
+
+    raise RuntimeError(f"妙想 API 请求失败：{last_error}")
+
+
+def _mxnews_query(query: str, count: int = 5) -> List[str]:
+    """调用妙想新闻搜索 API，返回标题列表。"""
+    api_key = os.environ.get("MX_APIKEY", "").strip()
+    if not api_key:
+        return []
+    url = "https://mkapi2.dfcfs.com/finskillshub/api/claw/news-search"
+    headers = {"apikey": api_key, "Content-Type": "application/json"}
+    body = {"query": query, "searchType": "NEWS", "count": count}
+    try:
+        resp = requests.post(url, headers=headers, json=body, timeout=15, verify=False)
+        data = resp.json()
+        news_list = data.get("data", {}).get("data", {}).get("llmSearchResponse", {}).get("data", [])
+        seen = set()
+        result = []
+        for n in news_list:
+            if not isinstance(n, dict):
+                continue
+            title = str(n.get("title", "")).strip()
+            if title and title not in seen:
+                seen.add(title)
+                result.append(title)
+        return result
+    except Exception:
+        return []
+
+
+def _query_macro_data() -> Dict[str, str]:
+    """查询宏观数据（PMI, CPI, 国债收益率, 北向资金）存入 market_state 的宏字段。"""
+    result: Dict[str, str] = {}
+    queries = [
+        ("pmi", "最新PMI数据 中国制造业采购经理指数"),
+        ("cpi", "最新CPI数据 中国消费者物价指数"),
+        ("bond_yield", "最新10年期国债收益率"),
+        ("north_flow", "北向资金 净买入 沪深股通 资金流向"),
+    ]
+    for key, q in queries:
+        try:
+            titles = _mxnews_query(q, 3)
+            if titles:
+                result[key] = " | ".join(titles[:2])
+        except Exception:
+            pass
+    return result
+
+
+def _mxdata_extract_single_price(result: Any, symbol: str) -> Optional[float]:
+    """
+    从单个股票的 mx-data 响应中直接提取最新价。
+    绕过 pivot table 解析，直接从 dto.table.f2 读取。
+    返回 float 或 None。
+    """
+    try:
+        if not isinstance(result, dict):
+            return None
+        inner = result.get("data")
+        if not isinstance(inner, dict):
+            return None
+        inner2 = inner.get("data")
+        if not isinstance(inner2, dict):
+            return None
+        search = inner2.get("searchDataResultDTO")
+        if not isinstance(search, dict):
+            return None
+        for dto in search.get("dataTableDTOList", []):
+            if not isinstance(dto, dict):
+                continue
+            raw_code = str(dto.get("code") or "").strip()
+            raw_code = raw_code.replace(".SH", "").replace(".SZ", "").replace(".BJ", "").zfill(6)
+            if raw_code != symbol:
+                continue
+            table = dto.get("table")
+            if not isinstance(table, dict):
+                continue
+            name_map = dto.get("nameMap", {})
+            if not isinstance(name_map, dict):
+                continue
+            # name_map maps API field keys (f2) to field names (最新价)
+            # Find which key maps to "最新价"
+            target_key = None
+            for api_key, label in name_map.items():
+                if "最新价" in str(label) or "current" in str(label).lower():
+                    target_key = api_key
+                    break
+            if not target_key:
+                target_key = "f2"  # default
+            vals = table.get(target_key)
+            if isinstance(vals, list) and len(vals) > 0:
+                raw_val = str(vals[0]).strip()
+                if raw_val:
+                    return float(raw_val)
+    except Exception:
+        pass
+    return None
+
+
+def _mxdata_extract_tables(result: Any) -> List[Dict[str, Any]]:
+    """从 mx-data 原始响应中提取表格行，兼容 dataRowsList 和 pivot (table/headName) 两种格式。"""
+    if not isinstance(result, dict):
+        return []
+    data = result.get("data")
+    if not isinstance(data, dict):
+        return []
+    inner = data.get("data")
+    if not isinstance(inner, dict):
+        return []
+    search = inner.get("searchDataResultDTO")
+    if not isinstance(search, dict):
+        return []
+    tables: List[Dict[str, Any]] = []
+    for dto in search.get("dataTableDTOList", []):
+        if not isinstance(dto, dict):
+            continue
+        title = dto.get("title") or dto.get("inputTitle") or "table"
+        rows = dto.get("dataRowsList") or dto.get("dataRows") or []
+        if isinstance(rows, list) and rows:
+            tables.append({"title": title, "rows": rows, "nameMap": dto.get("nameMap", {})})
+            continue
+        # pivot format: table.headName (dates) + indicator arrays
+        table = dto.get("table")
+        if not isinstance(table, dict):
+            continue
+        headName = table.get("headName", [])
+        if not isinstance(headName, list) or not headName:
+            continue
+        name_map = dto.get("nameMap", {})
+        if isinstance(name_map, list):
+            name_map = {str(i): v for i, v in enumerate(name_map)}
+        elif not isinstance(name_map, dict):
+            name_map = {}
+        pivot_code = str(dto.get("code") or dto.get("secCode") or "").strip()
+        if pivot_code.endswith(".SH") or pivot_code.endswith(".SZ"):
+            pivot_code = pivot_code[:-3]
+        if pivot_code.endswith(".BJ"):
+            pivot_code = pivot_code[:-3]
+        pivot_code = pivot_code.zfill(6)
+        # Build row-per-entry (one row per headName value)
+        pivot_rows: List[Dict[str, str]] = []
+        for idx, _ in enumerate(headName):
+            row: Dict[str, str] = {":code": pivot_code}
+            for key in table:
+                if key == "headName":
+                    row[":headName"] = str(headName[idx]) if idx < len(headName) else ""
+                    continue
+                vals = table[key]
+                if isinstance(vals, list) and idx < len(vals):
+                    label = name_map.get(key, name_map.get(str(key), str(key)))
+                    row[str(label)] = str(vals[idx])
+            pivot_rows.append(row)
+        tables.append({"title": title, "rows": pivot_rows, "pivot": True})
+    return tables
+
+
+def _extract_sectors_from_news(news_titles: List[str]) -> Tuple[List[str], List[str], List[str]]:
+    """从新闻标题中提取板块关键词，返回 (hot_topics, watch_sectors, avoid_sectors)。"""
+    keywords: Dict[str, str] = {
+        "新能源": "新能源", "光伏": "新能源", "锂电池": "新能源", "储能": "新能源",
+        "AI": "科技成长", "人工智能": "科技成长", "芯片": "科技成长", "半导体": "科技成长",
+        "消费电子": "科技成长", "数字经济": "科技成长", "算力": "科技成长",
+        "医药": "医药医疗", "医疗": "医药医疗", "生物": "医药医疗",
+        "消费": "消费", "食品": "消费饮料", "白酒": "消费饮料",
+        "金融": "金融", "银行": "金融", "券商": "金融", "保险": "金融",
+        "地产": "地产基建", "基建": "地产基建",
+        "汽车": "汽车", "新能源车": "汽车",
+        "资源": "资源周期", "煤炭": "资源周期", "有色": "资源周期", "钢铁": "资源周期",
+    }
+    found: List[str] = []
+    for title in news_titles:
+        for kw, sector in keywords.items():
+            if kw in title and sector not in found:
+                found.append(sector)
+    # 从新闻判断看多/看空
+    watch: List[str] = []
+    avoid: List[str] = []
+    for title in news_titles:
+        for kw, sector in keywords.items():
+            if kw not in title:
+                continue
+            for bear_word in ("风险", "下跌", "回调", "减持", "利空", "警惕", "调整"):
+                if bear_word in title and sector not in avoid and sector in found:
+                    avoid.append(sector)
+            for bull_word in ("拉升", "涨停", "领涨", "上涨", "突破", "利好", "大涨", "反弹"):
+                if bull_word in title and sector not in watch:
+                    watch.append(sector)
+    hot = found[:5]
+    return hot, watch, avoid
+
+
+def _parse_ssz_indicators(raw: Any, idx: int = 0) -> Dict[str, str]:
+    """解析上证指数 pivot 表格，取出指定位置（默认最新）的指标值。"""
+    vals: Dict[str, str] = {}
+    for tbl in _mxdata_extract_tables(raw):
+        for row in tbl.get("rows", []):
+            if isinstance(row, dict):
+                for k, v in row.items():
+                    if k != ":headName":
+                        vals[k] = v
+    return vals
+
+
+def _refresh_market() -> Dict[str, Any]:
+    """通过 mx-data 多重查询实时更新市场状态全部字段。"""
+    now = now_str()
+    today = now[:10]
+    previous = read_json(WORKSPACE_DIR / "state" / "market_state.json", {})
+    has_new_data = False
+
+    evidence_lines: List[str] = []
+    indices: Dict[str, str] = {}
+    up_count = 0
+    down_count = 0
+    total_money_flow = 0.0
+
+    # 查询1: 指数行情
+    try:
+        raw = _mxdata_query("上证指数 深证成指 创业板指 今日最新行情 最新价 涨跌幅 成交额")
+        for tbl in _mxdata_extract_tables(raw):
+            for row in tbl["rows"]:
+                if isinstance(row, dict):
+                    name = str(row.get("证券名称") or row.get("名称") or row.get("secName") or "").strip()
+                    price = str(row.get("最新价") or row.get("收盘价") or row.get("currentPrice") or "").strip()
+                    change = str(row.get("涨跌幅") or row.get("changePct") or "").strip()
+                    vol = str(row.get("成交额") or row.get("amount") or "").strip()
+                    if name:
+                        parts = [name, price] if price else [name]
+                        if change: parts.append(change)
+                        if vol: parts.append(vol)
+                        evidence_lines.append(" ".join(parts))
+                        indices[name] = price
+        if evidence_lines:
+            has_new_data = True
+    except Exception:
+        pass
+
+    # 查询2: 上涨家数 / 下跌家数 (pivot格式)
+    try:
+        raw2 = _mxdata_query("上证指数 涨跌家数")
+        vals = _parse_ssz_indicators(raw2)
+        up_str = vals.get("上涨家数", "")
+        down_str = vals.get("下跌家数", "")
+        if up_str:
+            try: up_count = int(float(up_str))
+            except: pass
+        if down_str:
+            try: down_count = int(float(down_str))
+            except: pass
+        if up_count > 0 or down_count > 0:
+            evidence_lines.append(f"上涨{up_count}家 下跌{down_count}家")
+            has_new_data = True
+    except Exception:
+        pass
+
+    # 查询3: 主力资金净流入 (pivot格式)
+    try:
+        raw3 = _mxdata_query("上证指数 主力资金流入流出")
+        vals3 = _parse_ssz_indicators(raw3)
+        for k, v in vals3.items():
+            if "净" in k or "净额" in k.replace("流入", "").replace("流出", ""):
+                cleaned = v.replace(",", "").replace("亿", "0000").replace("万", "")
+                # 尝试提取数值
+                nums = re.findall(r"-?\d+\.?\d*", cleaned)
+                if nums:
+                    total_money_flow = float(nums[0])
+                    if "万" in v:
+                        total_money_flow *= 10000
+                    elif "亿" not in v and "万" not in v and total_money_flow > 1000:
+                        pass
+        if total_money_flow != 0:
+            flow_label = "净流入" if total_money_flow > 0 else "净流出"
+            evidence_lines.append(f"主力资金{flow_label} {abs(total_money_flow):.0f}万元")
+            has_new_data = True
+    except Exception:
+        pass
+
+    # 查询4: 今日重要财经新闻
+    key_events: List[str] = []
+    try:
+        news_titles = _mxnews_query("今日A股市场重要财经新闻", 8)
+        if news_titles:
+            key_events = news_titles[:8]
+            has_new_data = True
+    except Exception:
+        pass
+
+    # 从新闻标题提取板块信息
+    hot_topics: List[str] = []
+    watch_sectors: List[str] = []
+    avoid_sectors: List[str] = []
+    if key_events:
+        hot_topics, watch_sectors, avoid_sectors = _extract_sectors_from_news(key_events)
+
+    # 计算市场情绪
+    sentiment_score = 50
+    if up_count > 0 or down_count > 0:
+        total = up_count + down_count
+        if total > 0:
+            sentiment_score = int(up_count / total * 100)
+    elif indices:
+        change_vals = []
+        for v in indices.values():
+            try:
+                cv = float(v.replace("%", ""))
+                change_vals.append(cv)
+            except: pass
+        if change_vals:
+            avg_change = sum(change_vals) / len(change_vals)
+            sentiment_score = max(0, min(100, 50 + int(avg_change * 5)))
+
+    sentiment_label = "bullish" if sentiment_score >= 60 else "bearish" if sentiment_score <= 40 else "neutral"
+
+    market_view = "neutral"
+    if sentiment_score >= 65:
+        market_view = "bullish"
+    elif sentiment_score <= 35:
+        market_view = "bearish"
+
+    risk_level = "medium"
+    if abs(sentiment_score - 50) > 30:
+        risk_level = "low"
+    elif abs(sentiment_score - 50) < 10:
+        risk_level = "high"
+
+    if not has_new_data:
+        hot_topics = previous.get("hot_topics", hot_topics)
+        watch_sectors = previous.get("watch_sectors", watch_sectors)
+        avoid_sectors = previous.get("avoid_sectors", avoid_sectors)
+        key_events = previous.get("key_events", key_events)
+        sentiment_score = previous.get("market_sentiment", {}).get("score", sentiment_score)
+        sentiment_label = previous.get("market_sentiment", {}).get("label", sentiment_label)
+        market_view = previous.get("market_view", market_view)
+        risk_level = previous.get("risk_level", risk_level)
+
+    market_data = {
+        "date": today,
+        "market_view": market_view,
+        "risk_level": risk_level,
+        "summary": "；".join(evidence_lines) if evidence_lines else previous.get("summary", "无数据"),
+        "hot_topics": hot_topics,
+        "watch_sectors": watch_sectors,
+        "avoid_sectors": avoid_sectors,
+        "key_events": key_events,
+        "macro": _query_macro_data(),
+        "market_sentiment": {"score": sentiment_score, "label": sentiment_label},
+        "updated_at": now,
+        "evidence": [
+            {"source": "mx-data", "summary": line}
+            for line in (evidence_lines if evidence_lines else [previous.get("summary", "无数据")])
+        ],
+    }
+
+    path = WORKSPACE_DIR / "state" / "market_state.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(market_data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return {"indices": indices, "updated_at": now, "has_new_data": has_new_data}
+
+
+def _refresh_account() -> Dict[str, Any]:
+    """从妙想API同步持仓，API不可用时回退到本地文件计算。"""
+    try:
+        result = _refresh_account_mx()
+        if isinstance(result, dict) and result.get("error"):
+            return _refresh_account_local()
+        return result
+    except Exception:
+        return _refresh_account_local()
+
+
+def _refresh_account_mx() -> Dict[str, Any]:
+    """从妙想API获取持仓和账户状态。"""
+    api_key = os.environ.get("MX_APIKEY", "").strip()
+    api_url = os.environ.get("MX_API_URL", "").strip()
+    if not api_key or not api_url:
+        raise RuntimeError("MX_APIKEY 或 MX_API_URL 未配置")
+
+    proxies = {}
+    https_proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or ""
+    if https_proxy.strip():
+        proxies["https"] = https_proxy.strip()
+
+    headers = {"apikey": api_key, "Content-Type": "application/json"}
+    last_error: Optional[Exception] = None
+    raw: Any = None
+    for attempt in range(3):
+        try:
+            resp = requests.post(f"{api_url}/api/claw/mockTrading/positions", headers=headers, json={"moneyUnit": 1}, timeout=30, verify=False, proxies=proxies or None)
+            resp.raise_for_status()
+            raw_text = resp.text.strip()
+            if not raw_text:
+                raise RuntimeError(f"妙想 API 返回空内容 (status={resp.status_code})")
+            try:
+                raw = resp.json()
+            except json.JSONDecodeError as e:
+                raise RuntimeError(f"妙想 API 返回非 JSON: {e} | 前200字: {raw_text[:200]}")
+            if not isinstance(raw, dict):
+                raise RuntimeError(f"妙想 API 返回非 dict: {type(raw).__name__}")
+            break
+        except Exception as e:
+            last_error = e
+            if attempt < 2:
+                time.sleep((attempt + 1) * 2)
+    if raw is None:
+        raise RuntimeError(f"妙想 API 请求失败: {last_error}")
+
+    if not (raw.get("success") or str(raw.get("code")) == "200"):
+        return {"error": f"API 返回失败: {raw.get('message')}"}
+
+    data = raw.get("data")
+    if not isinstance(data, dict):
+        return {"error": "API 返回 data 字段缺失或非 dict"}
+
+    pos_list = data.get("posList")
+    if not isinstance(pos_list, list):
+        pos_list = []
+    return _save_account_from_positions(pos_list, data.get("totalAssets"), data.get("availBalance"))
+
+
+def _refresh_account_local() -> Dict[str, Any]:
+    """从本地文件计算持仓和账户状态。"""
+    now = now_str()
+    holdings = read_jsonl(WORKSPACE_DIR / "pools" / "holdings.jsonl")
+    trades = read_jsonl(WORKSPACE_DIR / "logs" / "trades.jsonl")
+    previous = read_json(WORKSPACE_DIR / "state" / "account_state.json", {})
+
+    # 从交易记录计算现金余额
+    initial_cash = previous.get("initial_cash", 1000000.0)
+    cash = initial_cash
+    for t in trades:
+        if not isinstance(t, dict):
+            continue
+        side = str(t.get("side") or t.get("type", "")).lower()
+        price = float(t.get("price", 0) or 0)
+        quantity = int(t.get("count") or t.get("quantity", 0) or 0)
+        if side in ("buy", "买入"):
+            cash -= price * quantity
+        elif side in ("sell", "卖出"):
+            cash += price * quantity
+
+    # 从mx-data逐个查询持仓最新价（批量查询返回交叉表格式，无法直接匹配代码）
+    positions: List[Dict[str, Any]] = []
+    total_market_value = 0.0
+    total_pnl = 0.0
+    prices: Dict[str, float] = {}
+    if holdings:
+        for h in holdings:
+            if not isinstance(h, dict):
+                continue
+            symbol = str(h.get("symbol", "")).strip().zfill(6)
+            if not symbol:
+                continue
+            try:
+                raw = _mxdata_query(f"{symbol} 最新价")
+                for tbl in _mxdata_extract_tables(raw):
+                    for row in tbl.get("rows", []):
+                        if not isinstance(row, dict):
+                            continue
+                        code = str(row.get(":code") or row.get("证券代码") or row.get("secuCode") or row.get("code") or "").strip().zfill(6)
+                        if code != symbol:
+                            # single-stock query: pivot row may have :code = symbol
+                            # but the dto-level code is the primary; also check row keys
+                            pass
+                        for key in ("最新价", "收盘价", "currentPrice", "price"):
+                            val = row.get(key)
+                            if val is not None:
+                                try:
+                                    pv = float(val)
+                                    if pv > 0:
+                                        prices[code] = pv
+                                except (ValueError, TypeError):
+                                    pass
+                                break
+                # If pivot format didn't match via :code, try fallback from raw API
+                if symbol not in prices:
+                    fallback = _mxdata_extract_single_price(raw, symbol)
+                    if fallback is not None:
+                        prices[symbol] = fallback
+            except Exception:
+                pass
+            time.sleep(0.3)
+
+        for h in holdings:
+            if not isinstance(h, dict):
+                continue
+            symbol = str(h.get("symbol", "")).strip().zfill(6)
+            if not symbol:
+                continue
+            quantity = int(h.get("count") or h.get("quantity", 0) or 0)
+            avg_cost = float(h.get("cost_price") or h.get("avg_cost", 0) or 0)
+            current_price = prices.get(symbol, float(h.get("current_price", 0) or 0))
+            mv = current_price * quantity
+            pnl = (current_price - avg_cost) * quantity
+            pnl_ratio = (current_price / avg_cost - 1) * 100 if avg_cost else 0
+
+            entry = dict(h)
+            entry.update({
+                "current_price": current_price,
+                "market_value": mv,
+                "unrealized_pnl": pnl,
+                "unrealized_pnl_pct": round(pnl_ratio, 2),
+                "updated_at": now_str(),
+            })
+            positions.append(entry)
+            total_market_value += mv
+            total_pnl += pnl
+
+    available_cash = max(0, cash)
+    total_asset = available_cash + total_market_value
+
+    return _save_account_from_positions(positions, total_asset, available_cash)
+
+
+def _save_account_from_positions(positions: List[Dict[str, Any]], total_asset: Any, available_cash: Any) -> Dict[str, Any]:
+    """将持仓信息写入 account_state.json 和 holdings.jsonl。"""
+    now = now_str()
+    total_market_value = sum(p.get("market_value", 0) for p in positions if isinstance(p, dict))
+    available = 0.0
+    try:
+        available = float(available_cash) if available_cash else 0.0
+    except (ValueError, TypeError):
+        available = 0.0
+    total = 0.0
+    try:
+        total = float(total_asset) if total_asset else 0.0
+    except (ValueError, TypeError):
+        total = 0.0
+    if total <= 0:
+        total = available + total_market_value
+    if available <= 0 and total >= total_market_value:
+        available = total - total_market_value
+
+    previous = read_json(WORKSPACE_DIR / "state" / "account_state.json", {})
+    peak = max(float(previous.get("peak_value", 0) or 0), total)
+    drawdown = round((peak - total) / peak * 100, 2) if peak > 0 else 0.0
+    initial = float(previous.get("initial_cash", 1000000.0) or 1000000.0)
+    total_return_rate = round((total - initial) / initial * 100, 2) if initial > 0 else 0.0
+
+    account = {
+        **previous,
+        "mode": previous.get("mode") or "active",
+        "cash": available,
+        "total_asset": total,
+        "peak_value": peak,
+        "drawdown_pct": drawdown,
+        "market_value": total_market_value,
+        "available_cash": available,
+        "position_count": sum(1 for p in positions if isinstance(p, dict) and (p.get("count") or p.get("quantity", 0) or 0) > 0 or p.get("market_value", 0) > 0),
+        "positions": positions,
+        "risk": previous.get("risk", {"max_position_ratio": 0.8, "max_single_stock_ratio": 0.2, "max_daily_trades": 5, "stop_trading": False}),
+        "updated_at": now,
+        "total_return_rate": total_return_rate,
+    }
+
+    account_path = WORKSPACE_DIR / "state" / "account_state.json"
+    account_path.parent.mkdir(parents=True, exist_ok=True)
+    account_path.write_text(json.dumps(account, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    holdings_path = WORKSPACE_DIR / "pools" / "holdings.jsonl"
+    holdings_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(holdings_path, "w", encoding="utf-8") as f:
+        for p in positions:
+            f.write(json.dumps(p, ensure_ascii=False) + "\n")
+
+    return {"position_count": len(positions), "total_asset": total, "updated_at": now}
+
+
+def _refresh_candidates() -> Dict[str, Any]:
+    """通过一次 mx-data 批量查询所有候选股最新行情，更新 candidates.jsonl。"""
+    candidates = read_jsonl(WORKSPACE_DIR / "pools" / "candidates.jsonl")
+    if not candidates:
+        return {"updated": 0, "total": 0, "message": "候选池为空"}
+
+    symbol_to_cand: Dict[str, Dict[str, Any]] = {}
+    query_names: List[str] = []
+    for cand in candidates:
+        if not isinstance(cand, dict):
+            continue
+        symbol = str(cand.get("symbol") or "").strip()
+        name = str(cand.get("name") or "").strip()
+        if symbol:
+            symbol_to_cand[symbol] = cand
+            query_names.append(f"{name}({symbol})")
+
+    if not symbol_to_cand:
+        return {"updated": 0, "total": len(candidates), "message": "候选池无有效股票"}
+
+    now = now_str()
+    query_text = " ".join(query_names[:20]) + " 最新价"  # mx-data 单次最多约 20 只
+    updated_count = 0
+
+    try:
+        raw = _mxdata_query(query_text)
+        tables = _mxdata_extract_tables(raw)
+        for tbl in tables:
+            for row in tbl.get("rows", []):
+                if not isinstance(row, dict):
+                    continue
+                code = str(row.get(":code") or row.get("证券代码") or row.get("secuCode") or row.get("code") or "").strip().zfill(6)
+                if not code or code not in symbol_to_cand:
+                    continue
+                price_val = None
+                for key in ("最新价", "收盘价", "currentPrice", "price"):
+                    val = row.get(key)
+                    if val is not None:
+                        try:
+                            price_val = float(val)
+                        except (ValueError, TypeError):
+                            pass
+                        break
+                if price_val is not None and price_val > 0:
+                    cand = symbol_to_cand[code]
+                    old_price = cand.get("current_price", 0)
+                    cand["current_price"] = price_val
+                    cand["updated_at"] = now
+                    trigger = cand.get("trigger", {})
+                    ttype = trigger.get("type", "")
+                    tprice = trigger.get("price", 0)
+                    if ttype in ("price_below", "price_above") and tprice > 0 and old_price > 0:
+                        ratio = price_val / old_price
+                        if ratio < 0.85 or ratio > 1.15:
+                            new_tprice = round(price_val * (tprice / old_price), 2)
+                            trigger["price"] = new_tprice
+                    updated_count += 1
+    except Exception:
+        pass
+
+    candidates_path = WORKSPACE_DIR / "pools" / "candidates.jsonl"
+    with open(candidates_path, "w", encoding="utf-8") as f:
+        for cand in candidates:
+            f.write(json.dumps(cand, ensure_ascii=False) + "\n")
+
+    return {"updated": updated_count, "total": len(candidates), "updated_at": now}
+
+
+def refresh_all_data() -> Dict[str, Any]:
+    """一键刷新全部关键数据：市场、账户、候选股。"""
+    results: Dict[str, Any] = {"market": None, "account": None, "candidates": None}
+    errors: List[str] = []
+
+    try:
+        results["market"] = _refresh_market()
+    except Exception as e:
+        errors.append(f"市场刷新失败: {e}")
+
+    try:
+        results["account"] = _refresh_account()
+    except Exception as e:
+        errors.append(f"账户刷新失败: {e}")
+
+    try:
+        results["candidates"] = _refresh_candidates()
+    except Exception as e:
+        errors.append(f"候选股刷新失败: {e}")
+
+    return {
+        "success": len(errors) == 0,
+        "partial": len(errors) > 0 and any(r is not None for r in results.values()),
+        "results": results,
+        "errors": errors,
+        "updated_at": now_str(),
+    }
+
+
 def start_manual_run(task: str, max_steps: int = 50) -> Dict[str, Any]:
     task = task.strip()
     if not task:
@@ -1702,7 +2445,11 @@ def start_manual_run(task: str, max_steps: int = 50) -> Dict[str, Any]:
         STATE.active_run = record
 
     def finish() -> None:
-        stdout, stderr = process.communicate()
+        try:
+            stdout, stderr = process.communicate(timeout=1800)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            stdout, stderr = process.communicate(timeout=5)
         ended = now_str()
         final = dict(record)
         final.update(
@@ -1743,6 +2490,49 @@ def write_scout_recommendations(items: List[Dict[str, Any]]) -> None:
             f.write(json.dumps(item, ensure_ascii=False) + "\n")
 
 
+def _extract_price_from_mx(raw: Any) -> float:
+    """从 mx-data 结果中提取最新价，兼容 dataRowsList 和 pivot 格式。"""
+    for tbl in _mxdata_extract_tables(raw):
+        for row in tbl.get("rows", []):
+            if not isinstance(row, dict):
+                continue
+            # dataRowsList 格式：有独立代码列
+            code = str(row.get("证券代码") or row.get("secuCode") or row.get("code") or "").strip()
+            if code:
+                for key in ("最新价", "收盘价", "currentPrice", "price"):
+                    val = row.get(key)
+                    if val is not None:
+                        try:
+                            parsed = float(val)
+                            if parsed > 0:
+                                return parsed
+                        except (ValueError, TypeError):
+                            pass
+                continue
+            # pivot 格式：nameMap 中的中文列名即指标名
+            for key, val in row.items():
+                if key == ":headName":
+                    continue
+                if "价" in key:
+                    try:
+                        parsed = float(str(val))
+                        if 0 < parsed < 10000:
+                            return parsed
+                    except (ValueError, TypeError):
+                        pass
+            # fallback: 取任意数值
+            for key, val in row.items():
+                if key == ":headName":
+                    continue
+                try:
+                    parsed = float(str(val))
+                    if 0 < parsed < 10000:
+                        return parsed
+                except (ValueError, TypeError):
+                    pass
+    return 0.0
+
+
 def accept_scout_recommendation(rec_id: str) -> Dict[str, Any]:
     recs = read_scout_recommendations()
     target = None
@@ -1756,24 +2546,38 @@ def accept_scout_recommendation(rec_id: str) -> Dict[str, Any]:
         raise ValueError(f"推荐 {rec_id} 状态不是 pending")
 
     now = now_str()
+    symbol = target["symbol"]
+    name = target["name"]
+    initial_price = 0.0
+
+    try:
+        raw = _mxdata_query(f"{name}({symbol}) 最新价 收盘价")
+        initial_price = _extract_price_from_mx(raw)
+    except Exception:
+        pass
+
+    trigger_price = round(initial_price * 0.95, 2) if initial_price > 0 else 0
+    stop_loss = round(initial_price * 0.85, 2) if initial_price > 0 else 0
+    take_profit = round(initial_price * 1.3, 2) if initial_price > 0 else 0
+
     candidate = {
         "candidate_id": f"RECMD-{now[:10].replace('-', '')}-{rec_id.split('-')[-1]}",
-        "symbol": target["symbol"],
-        "name": target["name"],
+        "symbol": symbol,
+        "name": name,
         "reason": target.get("reason", ""),
         "source": "stock_scout",
         "tags": [],
-        "score": 0,
+        "score": 70,
         "status": "watching",
-        "current_price": 0,
-        "trigger": {"type": "manual", "price": 0, "condition": "等待人工确认买入时机"},
+        "current_price": initial_price,
+        "trigger": {"type": "price_below", "price": trigger_price, "condition": f"价格回调至{trigger_price}元以下时分批买入"},
         "buy_plan": {"planned_quantity": 0, "planned_cash": 0, "max_position_ratio": 0.5},
-        "risk": {"stop_loss_price": 0, "take_profit_price": 0},
+        "risk": {"stop_loss_price": stop_loss, "take_profit_price": take_profit},
         "valid_until": "",
         "added_at": now,
         "updated_at": now,
         "evidence": [{"source": "stock_scout", "summary": target.get("reason", "")}],
-        "next_action": "等待进一步分析",
+        "next_action": "等待价格回调触发",
         "notes": f"自动选股推荐：{target.get('reason', '')}",
     }
 
@@ -1831,7 +2635,11 @@ def start_stock_scout() -> Dict[str, Any]:
         STATE.active_run = record
 
     def finish() -> None:
-        stdout, stderr = process.communicate()
+        try:
+            stdout, stderr = process.communicate(timeout=1800)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            stdout, stderr = process.communicate(timeout=5)
         ended = now_str()
         final = dict(record)
         final.update(
@@ -1892,6 +2700,31 @@ def count_step_types(run_dir: Path) -> Dict[str, int]:
     return counts
 
 
+def build_agent_actions_log() -> Dict[str, Any]:
+    """读取当天 agent_actions 日志内容。"""
+    today = datetime.now().strftime("%Y-%m-%d")
+    path = WORKSPACE_DIR.parent / "workspace" / "logs" / "agent_actions" / f"{today}.log"
+    if not path.exists():
+        path = WORKSPACE_DIR / "logs" / "agent_actions" / f"{today}.log"
+    if not path.exists():
+        return {"lines": [], "size": 0, "date": today}
+    try:
+        content = path.read_text(encoding="utf-8")
+        lines = content.strip().splitlines()
+        max_lines = 500
+        tail = lines[-max_lines:] if len(lines) > max_lines else lines
+        tail.reverse()
+        return {
+            "lines": tail,
+            "size": len(content),
+            "date": today,
+            "total": len(lines),
+            "showing": len(tail),
+        }
+    except Exception as e:
+        return {"lines": [f"[ERROR] failed to read log: {e}"], "size": 0, "date": today}
+
+
 def build_runtime_logs() -> Dict[str, Any]:
     runs_dir = WORKSPACE_DIR / "logs" / "agent_runs"
 
@@ -1936,7 +2769,10 @@ def build_runtime_logs() -> Dict[str, Any]:
     durations = [r["duration_seconds"] for r in runs if r.get("duration_seconds") is not None]
     avg_duration = round(sum(durations) / len(durations), 1) if durations else 0
 
+    agent_actions = build_agent_actions_log()
+
     return {
+        "agent_actions": agent_actions,
         "summary": {
             "total_runs": total,
             "success_count": success_count,
@@ -1965,6 +2801,12 @@ def build_runtime_logs() -> Dict[str, Any]:
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "AstraTradeDashboard/1.0"
+
+    GET_ONLY_PATHS = frozenset({
+        "/api/snapshot", "/api/style", "/api/api-config", "/api/scheduler",
+        "/api/scheduler-config", "/api/initialization", "/api/mx-quota",
+        "/api/scout-recommendations", "/api/runtime-logs", "/api/trace",
+    })
 
     def log_message(self, format: str, *args: Any) -> None:
         print(f"[{now_str()}] {self.address_string()} {format % args}")
@@ -1995,63 +2837,70 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
 
-        if path == "/api/snapshot":
-            self.send_json(build_snapshot())
-            return
+        try:
+            if path == "/api/snapshot":
+                self.send_json(build_snapshot())
+                return
 
-        if path == "/api/style":
-            self.send_json(style_payload())
-            return
+            if path == "/api/style":
+                self.send_json(style_payload())
+                return
 
-        if path == "/api/api-config":
-            self.send_json(api_config_payload())
-            return
+            if path == "/api/api-config":
+                self.send_json(api_config_payload())
+                return
 
-        if path == "/api/scheduler":
-            self.send_json(scheduler_status())
-            return
+            if path == "/api/scheduler":
+                self.send_json(scheduler_status())
+                return
 
-        if path == "/api/scheduler-config":
-            self.send_json(scheduler_config_payload())
-            return
+            if path == "/api/scheduler-config":
+                self.send_json(scheduler_config_payload())
+                return
 
-        if path == "/api/initialization":
-            self.send_json(initialization_status())
-            return
+            if path == "/api/initialization":
+                self.send_json(initialization_status())
+                return
 
-        if path == "/api/mx-quota":
-            self.send_json(mx_quota_payload())
-            return
+            if path == "/api/mx-quota":
+                self.send_json(mx_quota_payload())
+                return
 
-        if path == "/api/scout-recommendations":
-            self.send_json({
-                "recommendations": read_scout_recommendations(),
-                "pending_count": sum(1 for r in read_scout_recommendations() if r.get("status") == "pending"),
-            })
-            return
+            if path == "/api/scout-recommendations":
+                self.send_json({
+                    "recommendations": read_scout_recommendations(),
+                    "pending_count": sum(1 for r in read_scout_recommendations() if r.get("status") == "pending"),
+                })
+                return
 
-        if path == "/api/runtime-logs":
-            self.send_json(build_runtime_logs())
-            return
+            if path == "/api/runtime-logs":
+                self.send_json(build_runtime_logs())
+                return
 
-        if path == "/api/trace":
-            run_id = parse_qs(parsed.query).get("run_id", [""])[0]
-            self.send_json(read_trace_by_run_id(run_id))
-            return
+            if path == "/api/trace":
+                run_id = parse_qs(parsed.query).get("run_id", [""])[0]
+                self.send_json(read_trace_by_run_id(run_id))
+                return
 
-        if path == "/":
-            self.serve_static(STATIC_DIR / "index.html")
-            return
+            if path == "/":
+                self.serve_static(STATIC_DIR / "index.html")
+                return
 
-        if path.startswith("/static/"):
-            target = STATIC_DIR / path.removeprefix("/static/")
-            self.serve_static(target)
-            return
+            if path.startswith("/static/"):
+                target = STATIC_DIR / path.removeprefix("/static/")
+                self.serve_static(target)
+                return
 
-        self.send_error_json("Not found", status=404)
+            self.send_error_json("Not found", status=404)
+        except Exception:
+            self.send_error_json("Internal error", status=500)
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
+
+        if parsed.path in self.GET_ONLY_PATHS:
+            self.send_error_json("Method Not Allowed", status=405)
+            return
 
         try:
             body = self.read_body_json()
@@ -2102,6 +2951,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(stop_scheduler())
                 return
 
+            if parsed.path == "/api/refresh-all":
+                self.send_json(refresh_all_data())
+                return
+
             if parsed.path == "/api/initialize-workspace":
                 self.send_json(start_initialization())
                 return
@@ -2140,21 +2993,96 @@ def load_initialization_runs() -> None:
     STATE.recent_initializations = read_jsonl(INITIALIZATION_RUNS_PATH, limit=20)
 
 
+def _auto_refresh_loop() -> None:
+    while True:
+        now = datetime.now()
+        market_hours = (
+            now.weekday() < 5
+            and (
+                (now.hour == 9 and now.minute >= 30)
+                or now.hour == 10
+                or (now.hour == 11 and now.minute <= 30)
+                or now.hour == 13
+                or now.hour == 14
+            )
+        )
+        if market_hours:
+            try:
+                refresh_all_data()
+            except Exception:
+                pass
+
+        if market_hours:
+            remaining = (30 - now.minute % 30) * 60 - now.second
+            time.sleep(max(60, remaining))
+        else:
+            time.sleep(1800)
+
+
 def main() -> None:
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+
     load_manual_runs()
     load_initialization_runs()
+
+    threading.Thread(target=_auto_refresh_loop, daemon=True).start()
+
     host = "127.0.0.1"
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8787
-    server = ThreadingHTTPServer((host, port), Handler)
-    try:
-        start_scheduler(auto=True)
-    except Exception as exc:
-        print(f"[{now_str()}] failed to auto start scheduler: {exc}")
+    scheduler_started = False
+    while True:
+        try:
+            server = ThreadingHTTPServer((host, port), Handler)
+        except OSError as exc:
+            print(f"[{now_str()}] failed to bind port {port}: {exc}", flush=True)
+            return
 
-    print(f"AstraTrade dashboard running at http://{host}:{port}")
-    server.serve_forever()
+        if not scheduler_started:
+            try:
+                start_scheduler(auto=True)
+                scheduler_started = True
+            except Exception as exc:
+                print(f"[{now_str()}] failed to auto start scheduler: {exc}", flush=True)
+
+        print(f"AstraTrade dashboard running at http://{host}:{port}", flush=True)
+
+        try:
+            server.serve_forever()
+        except Exception as exc:
+            import traceback
+            traceback.print_exc()
+            print(f"[{now_str()}] server stopped unexpectedly: {exc}, restarting...", flush=True)
+            server.server_close()
+            continue
+
+        break
+
+
+def _singleton_mutex() -> bool:
+    """Windows 全局命名互斥体，确保只有一个 dashboard 进程运行。
+    返回 True 表示已有实例在运行（当前进程应退出）。
+    """
+    try:
+        import ctypes as _c
+        _INVALID_HANDLE = 0
+        _ERROR_ALREADY_EXISTS = 183
+        _name = "AstraTradeDashboard_Singleton"
+        _h = _c.windll.kernel32.CreateMutexW(None, False, _name)
+        if _h == _INVALID_HANDLE:
+            return False
+        if _c.windll.kernel32.GetLastError() == _ERROR_ALREADY_EXISTS:
+            _c.windll.kernel32.CloseHandle(_h)
+            import atexit as _ae
+            return True
+        import atexit as _ae
+        _ae.register(lambda: _c.windll.kernel32.CloseHandle(_h))
+        return False
+    except Exception:
+        return False
 
 
 if __name__ == "__main__":
-    main()
+    if _singleton_mutex():
+        print(f"[{now_str()}] 检测到已有 dashboard 进程运行，退出避免重复。", flush=True)
+    else:
+        main()

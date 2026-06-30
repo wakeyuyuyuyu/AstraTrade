@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>AstraTrade Console</title>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/styles.css?v=5" />
   </head>
   <body>
     <div class="app-frame">
@@ -63,12 +63,16 @@
 
         <main>
           <section id="page-console" class="page-view active">
+            <div class="refresh-all-bar">
+              <button id="refreshAllBtn" class="primary-button" type="button">⟳ 全部刷新</button>
+              <span id="refreshAllStatus" class="muted" style="margin-left:12px"></span>
+            </div>
             <div class="dashboard-grid">
               <section class="panel account-panel">
                 <div class="panel-header">
                   <div>
                     <p class="eyebrow">Account</p>
-                    <h2>账户状态</h2>
+                    <h2>账户状态 <span id="accountReturnRate" class="return-rate">--</span></h2>
                   </div>
                   <span id="accountMode" class="tag">--</span>
                 </div>
@@ -584,22 +588,21 @@
           </section>
 
           <section id="page-logs" class="page-view">
-            <section class="panel logs-panel">
+            <section class="panel">
               <div class="panel-header">
                 <div>
-                  <p class="eyebrow">Runtime Logs</p>
-                  <h2>运行日志</h2>
+                  <p class="eyebrow">Agent Actions</p>
+                  <h2>Agent 动作日志</h2>
                 </div>
-                <span id="logsTotalBadge" class="tag">--</span>
+                <span id="agentActionsBadge" class="tag">--</span>
               </div>
-              <div id="logsSummary" class="logs-summary"></div>
-              <div id="logsRunList" class="logs-run-list"></div>
+              <div id="agentActionsLog" class="agent-actions-log"></div>
             </section>
           </section>
         </main>
       </div>
     </div>
 
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=4"></script>
   </body>
 </html>

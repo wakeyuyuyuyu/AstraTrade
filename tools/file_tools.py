@@ -626,35 +626,118 @@ class FileTools:
                 "error": error,
             }
 
+    def _memory_dir(self) -> Path:
+        return self.workspace_root.parent / "memory"
+
+    def _memory_date_path(self, date_str: str | None = None) -> Path:
+        if not date_str:
+            date_str = datetime.now().strftime("%Y-%m-%d")
+        return self._memory_dir() / date_str
+
+    def read_memory(self, type: str = "eod_review", date: str | None = None) -> Dict[str, Any]:
+        """
+        读取当日记忆文件：
+
+        memory/YYYY-MM-DD/
+            eod_review.md
+            summary.md
+            plan.md
+        """
+        try:
+            if type not in ["eod_review", "summary", "plan"]:
+                raise ValueError("type 必须是 eod_review / summary / plan")
+
+            date_str = date or datetime.now().strftime("%Y-%m-%d")
+            target_path = self._memory_date_path(date_str) / f"{type}.md"
+
+            if not target_path.exists():
+                return {
+                    "success": False,
+                    "tool": "read_memory",
+                    "memory_type": type,
+                    "date": date_str,
+                    "error": f"记忆文件不存在: {target_path}",
+                }
+
+            content = target_path.read_text(encoding="utf-8")
+            return {
+                "success": True,
+                "tool": "read_memory",
+                "memory_type": type,
+                "date": date_str,
+                "path": str(target_path),
+                "content": content,
+            }
+        except Exception as exc:
+            return {
+                "success": False,
+                "tool": "read_memory",
+                "memory_type": type,
+                "error": str(exc),
+            }
+
+    def list_memory_dates(self, limit: int = 14) -> Dict[str, Any]:
+        """列出最近 N 天有记忆文件的日期。"""
+        try:
+            mem_dir = self._memory_dir()
+            if not mem_dir.exists():
+                return {"success": True, "tool": "list_memory_dates", "dates": []}
+
+            dates: List[str] = []
+            for child in sorted(mem_dir.iterdir(), reverse=True):
+                if child.is_dir():
+                    date_str = child.name
+                    files = [f.name for f in child.iterdir() if f.suffix == ".md"]
+                    if files:
+                        dates.append({"date": date_str, "files": files})
+                if len(dates) >= limit:
+                    break
+
+            return {
+                "success": True,
+                "tool": "list_memory_dates",
+                "dates": dates,
+            }
+        except Exception as exc:
+            return {
+                "success": False,
+                "tool": "list_memory_dates",
+                "error": str(exc),
+            }
+
     def write_memory(self, type: str, content: str) -> Dict[str, Any]:
         """
         写入当日记忆文件：
 
         memory/YYYY-MM-DD/
+            eod_review.md
             summary.md
             plan.md
         """
         try:
-            if type not in ["summary", "plan"]:
-                raise ValueError("type 必须是 summary 或 plan")
+            if type not in ["eod_review", "summary", "plan"]:
+                raise ValueError("type 必须是 eod_review / summary / plan")
 
-            # 1. 获取今天日期
             today = datetime.now().strftime("%Y-%m-%d")
-
-            # 2. 构建目录
-            dir_path = self.workspace_root / "memory" / today
+            dir_path = self._memory_date_path(today)
             dir_path.mkdir(parents=True, exist_ok=True)
 
-            # 3. 文件名
-            if type == "summary":
-                filename = "summary.md"
-            else:
-                filename = "plan.md"
+            target_path = dir_path / f"{type}.md"
 
-            target_path = dir_path / filename
-
-            # 4. 写入（复用已有原子写）
-            self.write_file(str(target_path), content)
+            # Write directly (memory dir is outside workspace, bypass file validation)
+            tmp_fd, tmp_path = tempfile.mkstemp(
+                dir=str(dir_path),
+                prefix=".tmp_",
+            )
+            try:
+                with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+                    f.write(content)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp_path, str(target_path))
+            finally:
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
 
             return {
                 "success": True,

@@ -41,3 +41,21 @@ subagent/candidate_follow/candidate_state/
 
 # Local data exports
 workspace/logs/mx_data/output/
+
+# Configuration files (may contain sensitive/private data)
+config/
+
+# Local cache and database
+cache.db
+
+# Log files
+*.log
+
+# Memory / session history
+memory/
+
+# Personal notes
+docs/todo.md
+
+# Temp files
+workspace/tmp/

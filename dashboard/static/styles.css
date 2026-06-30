@@ -363,6 +363,19 @@ p {
   filter: brightness(1.08);
 }
 
+.refresh-all-bar {
+  display: flex;
+  align-items: center;
+  margin-bottom: 14px;
+  padding: 10px 16px;
+  background: var(--surface-2);
+  border-radius: 8px;
+  border: 1px solid var(--line);
+}
+.refresh-all-bar .primary-button {
+  flex-shrink: 0;
+}
+
 .dashboard-grid {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
@@ -439,6 +452,14 @@ p {
   line-height: 1.2;
   color: var(--ink);
 }
+
+.panel h2 .return-rate {
+  font-size: 18px;
+  font-weight: 680;
+  margin-left: 10px;
+}
+.panel h2 .return-rate.positive { color: var(--ok); }
+.panel h2 .return-rate.negative { color: var(--danger); }
 
 .panel-subtitle {
   margin-top: 6px;
@@ -1790,7 +1811,7 @@ p {
 .pool-deck {
   display: grid;
   grid-column: 1 / -1;
-  grid-template-columns: minmax(360px, 1.1fr) minmax(300px, 0.95fr) minmax(300px, 0.95fr);
+  grid-template-columns: 1fr;
   gap: 10px;
   align-items: stretch;
   min-width: 0;
@@ -1805,7 +1826,7 @@ p {
 }
 
 .pool-panel {
-  min-height: 430px;
+  min-height: 200px;
 }
 
 .pool-panel .panel-header {
@@ -1824,10 +1845,6 @@ p {
   color: var(--accent);
   border-color: rgba(32, 208, 162, 0.34);
   background: rgba(32, 208, 162, 0.09);
-}
-
-.pool-panel .table-wrap {
-  max-height: 350px;
 }
 
 .holdings-panel.pool-panel {
@@ -1933,12 +1950,9 @@ p {
 .table-wrap {
   position: relative;
   width: 100%;
-  max-height: 300px;
-  overflow-x: auto;
-  overflow-y: auto;
+  overflow: visible;
   overscroll-behavior-x: contain;
   -webkit-overflow-scrolling: touch;
-  scrollbar-gutter: stable;
   background:
     linear-gradient(90deg, rgba(32, 208, 162, 0.055), transparent 18px),
     linear-gradient(270deg, rgba(100, 168, 255, 0.06), transparent 18px);
@@ -1953,54 +1967,66 @@ p {
   background: rgba(255, 255, 255, 0.04);
 }
 
-.table-wrap::-webkit-scrollbar-thumb {
-  border: 2px solid var(--surface-2);
-  border-radius: 8px;
-  background: var(--accent);
+.pool-panel {
+  min-height: 0;
+}
+.pool-panel .panel-header {
+  min-height: 0;
+  padding: 6px 12px;
+}
+.pool-panel .panel-header h2 {
+  font-size: 16px;
+}
+.pool-panel .tag {
+  font-size: 11px;
 }
 
-table {
-  width: max-content;
-  min-width: 100%;
+.holding-insights {
+  display: none;
+}
+
+.pool-panel .table-wrap {
+  max-height: none;
+  overflow: visible;
+}
+
+.pool-panel table {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
   border-collapse: collapse;
-  table-layout: auto;
 }
-
-th,
-td {
-  min-width: 118px;
-  height: 42px;
-  padding: 9px 12px;
+.pool-panel th,
+.pool-panel td {
+  min-width: 0;
+  height: 34px;
+  padding: 5px 8px;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   border-bottom: 1px solid var(--line);
   text-align: left;
   vertical-align: middle;
-  font-size: 13px;
-  white-space: nowrap;
-  overflow: visible;
-  text-overflow: clip;
 }
-
-tbody tr {
+.pool-panel thead th {
+  font-size: 12px;
+  padding: 5px 8px;
+  height: 32px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: rgba(16, 24, 24, 0.96);
+  box-shadow: 0 1px 0 var(--line);
+}
+.pool-panel tbody tr {
   transition: background 0.15s ease, color 0.15s ease;
 }
-
-tbody tr:nth-child(even) {
+.pool-panel tbody tr:nth-child(even) {
   background: rgba(255, 255, 255, 0.015);
 }
-
-tbody tr:hover {
+.pool-panel tbody tr:hover {
   background: rgba(32, 208, 162, 0.085);
-}
-
-.holdings-panel th:nth-child(6),
-.holdings-panel td:nth-child(6),
-.strategy-panel th:nth-child(3),
-.strategy-panel td:nth-child(3),
-.strategy-panel th:nth-child(6),
-.strategy-panel td:nth-child(6),
-.candidates-panel th:nth-child(6),
-.candidates-panel td:nth-child(6) {
-  min-width: 240px;
 }
 
 th {
@@ -3338,6 +3364,23 @@ td.negative {
   text-align: center;
   color: var(--muted);
   font-size: 14px;
+}
+
+.agent-actions-log {
+  padding: 0 16px 16px;
+}
+.agent-actions-pre {
+  background: var(--surface-2);
+  color: var(--muted);
+  font-family: monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 14px;
+  border-radius: 8px;
+  max-height: 600px;
+  overflow-y: auto;
+  white-space: pre;
+  word-break: break-all;
 }
 
 .mx-quota-panel {

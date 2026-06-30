@@ -7,6 +7,7 @@ from time import perf_counter
 from typing import Any, Dict, List, Optional
 
 from services.llm_service import call_llm
+from services.agent_logger import log, log_tool_call, log_tool_result, log_thinking, log_final
 from tools.exec import exec_command
 from tools.file_tools import FileTools
 
@@ -94,14 +95,42 @@ AGENT_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "write_memory",
-            "description": "写入记忆文件",
+            "description": "写入当日记忆文件到 memory/YYYY-MM-DD/。type 可选: summary / plan / eod_review",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "type": {"type": "string", "description": "记忆类型"},
-                    "content": {"type": "string", "description": "记忆内容"},
+                    "type": {"type": "string", "description": "记忆类型: summary / plan / eod_review"},
+                    "content": {"type": "string", "description": "记忆正文 Markdown"},
                 },
                 "required": ["type", "content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_memory",
+            "description": "读取指定日期的记忆文件。type 可选 eod_review / summary / plan，不传 date 则默认为今天",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "type": {"type": "string", "description": "记忆类型: eod_review / summary / plan"},
+                    "date": {"type": "string", "description": "日期 YYYY-MM-DD，可选，默认今天"},
+                },
+                "required": ["type"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_memory_dates",
+            "description": "列出最近有记忆文件的日期列表",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "number", "description": "最多返回的天数，默认 14"},
+                },
             },
         },
     },
@@ -370,6 +399,15 @@ def execute_tool_call(tool: str, args: Dict[str, Any], project_root: str | Path)
         content = args.get("content", "")
         return file_tools.write_memory(type=memory_type, content=content)
 
+    if tool == "read_memory":
+        memory_type = args.get("type", "")
+        memory_date = args.get("date")
+        return file_tools.read_memory(type=memory_type, date=memory_date)
+
+    if tool == "list_memory_dates":
+        limit = args.get("limit", 14)
+        return file_tools.list_memory_dates(limit=limit)
+
     return {
         "success": False,
         "error": f"未知工具: {tool}",
@@ -381,15 +419,23 @@ def build_continue_message_after_thinking() -> str:
         "你刚刚已经输出了 thinking。"
         "现在请继续推进任务，只能输出以下三种 JSON 之一：thinking、tool_call、final。"
         "如果需要外部信息，请输出 tool_call；如果已经完成所有任务，请直接输出 final。"
+        "注意：如果下一步涉及 write/edit/add/exec 或交易决策，建议再输出一次 thinking 确认方案再执行。"
     )
 
 
 def build_tool_result_message(result: Dict[str, Any]) -> str:
     # print(f"tool result: {result}")
+    next_hint = ""
+    tool_name = result.get("tool", "")
+    if tool_name in ("read", "read_memory", "list_memory_dates"):
+        next_hint = "（简单查询结果，可直接推进下一步）"
+    else:
+        next_hint = "（建议先输出 thinking 分析结果再决定下一步）"
     return (
         "以下是你刚才请求的工具执行结果。"
         "请基于结果继续下一步，只能输出 thinking、tool_call 或 final 三种 JSON。\n\n"
         + json.dumps(result, ensure_ascii=False, indent=2)
+        + f"\n\n{next_hint}"
     )
 
 
@@ -469,6 +515,7 @@ def run_agent_loop(
     tool_call_history: List[Dict[str, Any]] = []
     agent_trace: List[Dict[str, Any]] = []
 
+    log("agent_loop", "START", f"max_steps={max_steps}")
     messages: List[Dict[str, str]] = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": "开始本轮系统运行。请严格按协议输出 JSON。"},
@@ -478,6 +525,7 @@ def run_agent_loop(
     error_retry_count = 0
 
     def finalize(result: Dict[str, Any]) -> Dict[str, Any]:
+        log("agent_loop", "END", f"success={result.get('success')} steps={step_count} summary={result.get('summary','')[:100]}")
         save_run_summary(
             run_log_path,
             result,
@@ -511,7 +559,9 @@ def run_agent_loop(
 
         try:
             response_text = call_llm(messages, "main", tools=AGENT_TOOLS)
+            log("agent_loop", "LLM_RESPONSE", f"step={step_index} len={len(response_text)}")
         except RuntimeError as e:
+            log("agent_loop", "LLM_ERROR", str(e)[:200])
             response_text = json.dumps({
                 "type": "error",
                 "error_type": "llm_call_failed",
@@ -547,6 +597,7 @@ def run_agent_loop(
 
         if parsed.get("type") == "error":
             error_retry_count += 1
+            log("agent_loop", "PARSE_ERROR", f"attempt={error_retry_count}/{max_error_retries} error={parsed.get('error','')[:100]}")
 
             if error_retry_count > max_error_retries:
                 result = build_final_result(
@@ -578,13 +629,20 @@ def run_agent_loop(
             error_retry_count = 0
             consecutive_thinking += 1
             messages.append({"role": "assistant", "content": response_text})
+            log_thinking(
+                "agent_loop",
+                parsed.get("mode", "unknown"),
+                parsed.get("phase", "unknown"),
+                parsed.get("next_action", "unknown"),
+            )
 
             if consecutive_thinking > max_consecutive_thinking:
                 messages.append({
                     "role": "user",
                     "content": (
                         "你已经连续多次输出 thinking。"
-                        "现在必须输出 tool_call 或 final，除非你能明确说明为什么仍然无法行动。"
+                        "现在必须输出 tool_call 推进任务。"
+                        "如果确实需要更多思考，output 中必须写明具体缺失什么信息、计划如何获取。"
                     ),
                 })
             else:
@@ -649,7 +707,10 @@ def run_agent_loop(
                 })
                 continue
 
+            log_tool_call("agent_loop", tool, args, parsed.get("reason", ""))
             tool_result = execute_tool_call(tool, args, project_root)
+            result_summary = str(tool_result.get("summary") or tool_result.get("content", ""))[:120] if tool_result.get("success") else (tool_result.get("error", "")[:120])
+            log_tool_result("agent_loop", tool, bool(tool_result.get("success")), result_summary)
             step_trace["tool_call"] = {
                 "tool": tool,
                 "args": args,
@@ -684,6 +745,7 @@ def run_agent_loop(
         if output_type == "final":
             final_result = normalize_final_result(parsed)
             final_result["success"] = True
+            log_final("agent_loop", final_result.get("summary", ""), final_result.get("actions", []), final_result.get("decisions", []))
 
             # If the model left tool_calls empty, preserve actual tool history.
             if not final_result.get("tool_calls"):
@@ -722,5 +784,6 @@ def run_agent_loop(
             ),
         })
 
+    log("agent_loop", "FORCED_STOP", f"exceeded max_steps={max_steps}")
     forced = build_forced_stop_result(max_steps)
     return finalize(forced)

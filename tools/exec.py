@@ -17,7 +17,6 @@ ALLOWED_BINARIES = {
     "python",
     "python3",
     "date",
-    "bash",
 }
 
 DANGEROUS_TOKENS = {

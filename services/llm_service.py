@@ -77,6 +77,7 @@ def call_llm(
     model_profile: str = "main",
     temperature: float = 0.2,
     tools: Optional[List[Dict[str, Any]]] = None,
+    max_tokens: int = 4096,
 ) -> str:
     """
     调用 LLM。
@@ -97,6 +98,7 @@ def call_llm(
         model_profile: 模型配置角色，默认 main
         temperature: 温度参数，默认 0.2
         tools: OpenAI function calling 工具列表（可选）
+        max_tokens: 单次响应的最大 token 数，默认 4096；设为 0 则不由客户端限制
 
     Returns:
         模型去除 <think>...</think> 后的最终输出（或原生 tool_call 转文本 JSON）
@@ -114,6 +116,7 @@ def call_llm(
             "model": config["model"],
             "messages": messages,
             "temperature": temperature,
+            "max_tokens": max_tokens,
         }
         if tools:
             kwargs["tools"] = tools

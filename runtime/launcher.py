@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from dotenv import load_dotenv
+from services.agent_logger import log
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -168,6 +169,8 @@ def run_once(
     prompt_path = reports_dir / f"{run_id}_prompt.md"
     result_path = reports_dir / f"{run_id}_result.json"
     run_log_dir = logs_dir / "agent_runs" / run_id
+
+    log("launcher", "AGENT_START", f"mode={mode} reason={trigger_reason} user_task={user_task[:80] if user_task else 'none'}")
 
     save_text(prompt_path, system_prompt)
 
