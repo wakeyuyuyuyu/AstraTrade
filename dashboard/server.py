@@ -2700,29 +2700,46 @@ def count_step_types(run_dir: Path) -> Dict[str, int]:
     return counts
 
 
-def build_agent_actions_log() -> Dict[str, Any]:
-    """读取当天 agent_actions 日志内容。"""
-    today = datetime.now().strftime("%Y-%m-%d")
-    path = WORKSPACE_DIR.parent / "workspace" / "logs" / "agent_actions" / f"{today}.log"
-    if not path.exists():
-        path = WORKSPACE_DIR / "logs" / "agent_actions" / f"{today}.log"
-    if not path.exists():
-        return {"lines": [], "size": 0, "date": today}
-    try:
-        content = path.read_text(encoding="utf-8")
-        lines = content.strip().splitlines()
-        max_lines = 500
-        tail = lines[-max_lines:] if len(lines) > max_lines else lines
-        tail.reverse()
-        return {
-            "lines": tail,
-            "size": len(content),
-            "date": today,
-            "total": len(lines),
-            "showing": len(tail),
-        }
-    except Exception as e:
-        return {"lines": [f"[ERROR] failed to read log: {e}"], "size": 0, "date": today}
+def build_agent_actions_log(days: int = 7) -> Dict[str, Any]:
+    """读取最近 N 天 agent_actions 日志内容。"""
+    log_dir = WORKSPACE_DIR / "logs" / "agent_actions"
+    all_lines: List[str] = []
+    total_size = 0
+    dates_loaded: List[str] = []
+
+    for offset in range(days):
+        day = (datetime.now() - timedelta(days=offset)).strftime("%Y-%m-%d")
+        path = log_dir / f"{day}.log"
+        if not path.exists():
+            path = WORKSPACE_DIR.parent / "workspace" / "logs" / "agent_actions" / f"{day}.log"
+        if not path.exists():
+            continue
+        try:
+            content = path.read_text(encoding="utf-8")
+            lines = content.strip().splitlines()
+            if lines:
+                all_lines.extend((line, day) for line in reversed(lines))
+                total_size += len(content)
+                dates_loaded.append(day)
+        except Exception:
+            pass
+
+    if not all_lines:
+        return {"lines": [], "size": 0, "date": datetime.now().strftime("%Y-%m-%d")}
+
+    all_lines.sort(key=lambda item: item[1], reverse=True)
+    merged = [line for line, _ in all_lines]
+    max_lines = 500
+    tail = merged[:max_lines] if len(merged) > max_lines else merged
+
+    return {
+        "lines": tail,
+        "size": total_size,
+        "date": datetime.now().strftime("%Y-%m-%d"),
+        "total": len(merged),
+        "showing": len(tail),
+        "dates": dates_loaded,
+    }
 
 
 def build_runtime_logs() -> Dict[str, Any]:
